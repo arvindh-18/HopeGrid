@@ -69,7 +69,7 @@ export default function PublicMap() {
 
         {nearby.length > 0 && (
           <Notice tone="danger">
-            <span className="flex items-center gap-2 font-medium"><IconAlert size={18} /> {nearby.length} {nearby.length === 1 ? 'hazard' : 'hazards'} within 2 km of you</span>
+            <span className="flex items-center gap-2 font-medium"><IconAlert size={18} /> {nearby.length} active {nearby.length === 1 ? 'hazard' : 'hazards'} within 2 km</span>
           </Notice>
         )}
         {mapUnavailable && <Notice tone="warning">Map unavailable {online ? '(map images could not load)' : "while you're offline"} — showing a list instead.</Notice>}

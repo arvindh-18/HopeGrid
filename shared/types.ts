@@ -281,6 +281,41 @@ export interface VolunteerAssignment {
   reporters: { reportId: string; label: string }[];
 }
 
+// ---------- Server records (DB rows in camelCase; converted only in server/mappers.ts) ----------
+export interface ProfileRecord {
+  id: string; name: string; email: string; role: Role; phone: string | null;
+  skills: Skill[]; equipment: Equipment[]; vehicle: Vehicle; availability: Availability;
+  lat: number | null; lng: number | null; createdAt: string;
+}
+export interface IncidentRecord {
+  id: string; code: string; type: IncidentType; lat: number | null; lng: number | null; locationText: string | null;
+  publicArea: string | null; people: number | null; vulnerable: boolean; trapped: boolean; medical: boolean; danger: boolean;
+  needs: Need[]; summary: string | null; status: IncidentStatus; confidence: number; confidenceReasons: Reason[];
+  priorityScore: number; priority: PriorityLevel; priorityReasons: Reason[]; priorityOverride: PriorityLevel | null;
+  overrideReason: string | null; escalationRecommended: boolean; escalationReasons: Reason[]; escalatedAt: string | null;
+  verifiedAt: string | null; onSiteAt: string | null; resolvedAt: string | null; rejectReason: string | null;
+  possibleDuplicateOf: string | null; mergedInto: string | null; createdAt: string; updatedAt: string;
+}
+export interface ReportRecord {
+  id: string; code: string; pin: string; deviceId: string; incidentId: string | null; text: string;
+  transcript: string | null; transcriptStatus: TranscriptStatus; lat: number | null; lng: number | null;
+  locationText: string | null; people: number | null; needs: Need[]; phone: string | null; phoneVerified: boolean;
+  photoPath: string | null; audioPath: string | null; audioSeconds: number | null;
+  extraction: Extraction | null; aiSource: AiSource | null; processingStatus: ProcessingStatus;
+  createdAt: string; receivedAt: string;
+}
+export interface AssignmentRecord {
+  id: string; incidentId: string; volunteerId: string; status: AssignmentStatus; reason: string | null;
+  createdAt: string; updatedAt: string;
+}
+export interface MessageRecord {
+  id: string; incidentId: string; reportId: string; assignmentId: string; sender: MessageSender; text: string | null;
+  audioPath: string | null; lat: number | null; lng: number | null; createdAt: string;
+}
+export interface ResourceRecord extends Resource { createdAt: string }
+export interface AllocationRecord { id: string; resourceId: string; incidentId: string; quantity: number; createdAt: string }
+export interface LogRecord { id: string; incidentId: string; text: string; public: boolean; createdAt: string }
+
 // ---------- Errors ----------
 export type ErrorCode =
   | 'VALIDATION' | 'UNAUTHORIZED' | 'FORBIDDEN' | 'NOT_FOUND' | 'CODE_TAKEN' | 'INVALID_STATE'

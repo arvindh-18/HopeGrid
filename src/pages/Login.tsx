@@ -1,6 +1,7 @@
 // S06 Staff login — seeded admin and volunteer accounts (features.md F11).
 import { useState, type FormEvent } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { DEMO_ADMIN_EMAIL, DEMO_PASSWORD, DEMO_VOLUNTEER_EMAIL } from '../../shared/constants';
 import { ApiError } from '../../shared/types';
 import { Layout } from '../components/Layout';
 import { Button, Field } from '../components/ui';
@@ -17,6 +18,12 @@ export default function Login() {
   const [busy, setBusy] = useState(false);
 
   if (user) return <Navigate to={homeFor(user)} replace />;
+
+  function fill(demoEmail: string) {
+    setEmail(demoEmail);
+    setPassword(DEMO_PASSWORD);
+    setError(null);
+  }
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -54,6 +61,12 @@ export default function Login() {
           </Field>
           {error && <p className="text-[14px] text-danger" role="alert">{error}</p>}
           <Button type="submit" size="lg" busy={busy}>Log in</Button>
+          {import.meta.env.DEV && (
+            <div className="flex flex-wrap gap-2 border-t border-hairline pt-4">
+              <button type="button" className="chip" onClick={() => fill(DEMO_ADMIN_EMAIL)}>Demo: Admin</button>
+              <button type="button" className="chip" onClick={() => fill(DEMO_VOLUNTEER_EMAIL)}>Demo: Volunteer (Ravi)</button>
+            </div>
+          )}
         </form>
       </div>
     </Layout>

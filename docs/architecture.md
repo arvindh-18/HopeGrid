@@ -8,7 +8,7 @@
 
 ## 1. Product in one paragraph
 
-Victims report emergencies from a phone (text, voice, photo, GPS) without logging in, even while offline. The server turns each report into a structured incident using local AI (Whisper for speech, Ollama for understanding), detects duplicates and related incidents, and scores confidence (how reliable) and priority (how urgent) with visible reasons. An admin reviews, verifies, merges, assigns a volunteer, allocates resources, escalates (simulated) and resolves. The volunteer accepts and updates progress, and can chat privately with the victim without either side seeing phone numbers. The public sees a safe hazard map.
+Victims report emergencies from a phone (text, voice, photo, GPS) without logging in, even while offline. The server turns each report into a structured incident using local AI (Whisper for speech, a local LLM for understanding), detects duplicates and related incidents, and scores confidence (how reliable) and priority (how urgent) with visible reasons. An admin reviews, verifies, merges, assigns a volunteer, allocates resources, escalates (simulated) and resolves. The volunteer accepts and updates progress, and can chat privately with the victim without either side seeing phone numbers. The public sees a safe hazard map.
 
 **Principle:** AI understands and assists. Humans verify and decide. Volunteers respond. The community stays informed.
 
@@ -39,13 +39,13 @@ There is no self-registration. All staff accounts are created by the seed script
                                 │ HTTPS (cloudflared/ngrok tunnel to laptop)
 ┌───────────────────────────────▼──────────────── Express server (laptop) ─────┐
 │ routes → shared rules (/shared) → Supabase client (service role)             │
-│ pipeline.ts: transcribe (Whisper) → structure (Ollama | keywords) → incident │
+│ pipeline.ts: transcribe (Whisper) → structure (local LLM | keywords) → incident │
 │              → duplicate check → scores                                      │
 │ Serves built frontend (dist/) in demo mode                                   │
 └───────┬───────────────────────┬──────────────────────────┬───────────────────┘
         │                       │                          │
-   Supabase (cloud)        Ollama (local)            whisper.cpp + ffmpeg (local)
-   - Postgres tables       - qwen2.5:3b              - ggml-small model
+   Supabase (cloud)        LLM (in-process)          whisper.cpp + ffmpeg (in-process)
+   - Postgres tables       - Qwen2.5 3B GGUF         - ggml-small model
    - Storage bucket "media" (private)
    - Auth (staff only)
 ```
@@ -63,8 +63,8 @@ There is no self-registration. All staff accounts are created by the seed script
 | D7 | Supabase Storage bucket `media`, **private**. Server returns signed URLs (1 hour) only to allowed users. | Victim photos/voice never public. |
 | D8 | Supabase Auth for staff login, called by the server (`/api/auth/login`). Server verifies bearer token on each request. | Real auth with no custom password handling. |
 | D9 | Report processing runs inside the server process after responding (not awaited). On server start, all `PENDING` reports are processed. | No queue infrastructure; nothing lost on restart. |
-| D10 | Ollama (`qwen2.5:3b` default) with JSON-schema output, temperature 0. Fallback: keyword extractor in `shared/`. | "Local AI"; demo never stalls. |
-| D11 | whisper.cpp CLI + ffmpeg for speech-to-text, called with `child_process`. | Local, multilingual (Tamil + English), works on recorded audio. |
+| D10 | Local LLM inside the server via `node-llama-cpp` (Qwen2.5 3B Instruct, GGUF Q4_K_M) with JSON-schema grammar, temperature 0. Fallback: keyword extractor in `shared/`. | "Local AI"; demo never stalls. |
+| D11 | whisper.cpp inside the server via `@fugood/whisper.node` (prebuilt, language auto-detect) + ffmpeg from `@ffmpeg-installer/ffmpeg`. Models download into `models/` only with `npm run setup-ai` (server laptop); without them the server falls back per BR-11/BR-12. | Local, multilingual (Tamil + English), works on recorded audio. |
 | D12 | Polling (no websockets/realtime). Intervals in `shared/constants.ts`. | Simple and enough at demo scale. |
 | D13 | Leaflet + OpenStreetMap tiles; list view fallback. | Free, no API key. |
 | D14 | Media and all request bodies are JSON with base64 media (no multipart). | One code path for online and offline (outbox stores JSON). |
@@ -76,9 +76,9 @@ There is no self-registration. All staff accounts are created by the seed script
 ## 4. Tech stack and allowed libraries
 
 **Frontend:** react, react-dom, react-router-dom, vite, @vitejs/plugin-react, vite-plugin-pwa, tailwindcss, @tailwindcss/vite, leaflet, react-leaflet, idb-keyval.
-**Backend:** express, @supabase/supabase-js, tsx (run TS), dotenv.
+**Backend:** express, @supabase/supabase-js, tsx (run TS), dotenv, node-llama-cpp, @fugood/whisper.node, @ffmpeg-installer/ffmpeg.
 **Tooling:** typescript, concurrently, vitest.
-**External programs (laptop):** Ollama, whisper.cpp (`whisper-cli`), ffmpeg, cloudflared (or ngrok).
+**Tunnel:** cloudflared (npm package, `npm run tunnel`). Nothing else is installed outside npm; Node.js 22.12+ is the only prerequisite.
 
 No other library may be added without lead approval (see `rules.md` AR-06).
 
@@ -103,7 +103,7 @@ hopegrid/
 │   └── rules.md
 ├── supabase/
 │   └── schema.sql
-├── models/                       (gitignored; whisper model file lives here)
+├── models/                       (gitignored; AI + speech model files, downloaded by npm run setup-ai)
 ├── shared/
 │   ├── types.ts
 │   ├── constants.ts
@@ -131,7 +131,8 @@ hopegrid/
 │   │   ├── messages.ts
 │   │   └── dev.ts
 │   └── scripts/
-│       └── seed.ts
+│       ├── seed.ts
+│       └── setup-models.ts       (npm run setup-ai)
 ├── src/
 │   ├── main.tsx
 │   ├── App.tsx
@@ -214,8 +215,8 @@ hopegrid/
 | auth.ts | Middleware `requireRole(role)`: reads `Authorization: Bearer <token>`, `db.auth.getUser(token)`, loads `profiles` row, attaches `req.user = {id, name, role}`; 401/403 otherwise. |
 | mappers.ts | DB row ↔ API object conversion (snake_case ↔ camelCase). Only place this happens. |
 | storage.ts | `uploadBase64(path, base64, mime)`, `signedUrl(path)` (1 hour). |
-| ai.ts | `structureText(text): Promise<{extraction, source}>` — Ollama call (timeout 30 s, JSON schema of `Extraction`), validate/coerce (BR-11), on any failure use `keywordExtractor` and `source = KEYWORDS`. |
-| transcribe.ts | `transcribe(storagePath): Promise<string>` — download audio, ffmpeg → 16 kHz mono wav in `tmp/`, run whisper-cli (`-l auto`), return text; timeout 60 s; delete temp files. Throws on failure. |
+| ai.ts | `structureText(text): Promise<{extraction, source}>` — local LLM call (node-llama-cpp) (timeout 30 s, JSON schema of `Extraction`), validate/coerce (BR-11), on any failure use `keywordExtractor` and `source = KEYWORDS`. |
+| transcribe.ts | `transcribe(storagePath): Promise<string>` — download audio, ffmpeg → 16 kHz mono PCM, whisper.cpp in-process (language auto), timeout 60 s. Throws on failure. |
 | pipeline.ts | `processReport(reportId)`, `recomputeIncident(incidentId)`, `processPendingReports()`. Implements §11.2. |
 | routes/victim.ts | `/api/reports`, `/api/track`, `/api/track/verify-phone`. |
 | routes/public.ts | `/api/public/incidents`. |
@@ -607,11 +608,8 @@ Errors are thrown as `ApiError {code, message}` in both implementations.
 | SUPABASE_URL | server | https://xxxx.supabase.co | |
 | SUPABASE_ANON_KEY | server | … | used only for login |
 | SUPABASE_SERVICE_ROLE_KEY | server | … | all data + storage; never sent to browser |
-| OLLAMA_URL | server | http://localhost:11434 | |
-| OLLAMA_MODEL | server | qwen2.5:3b | |
-| WHISPER_BIN | server | ./whisper.cpp/build/bin/whisper-cli | |
-| WHISPER_MODEL | server | ./models/ggml-small.bin | |
-| FFMPEG_BIN | server | ffmpeg | |
+| AI_MODEL | server | hf:Qwen/Qwen2.5-3B-Instruct-GGUF:Q4_K_M | optional; GGUF model URI or file |
+| WHISPER_MODEL | server | ./models/ggml-small.bin | optional |
 | DEV_MODE | server | true | enables /api/dev/reset and demo OTP hint |
 | EMERGENCY_NUMBER | server | 112 | |
 | VITE_EMERGENCY_NUMBER | frontend | 112 | |
@@ -624,10 +622,10 @@ In Supabase project settings set **JWT expiry = 86400 seconds** so staff tokens 
 
 1. Create Supabase project → run `supabase/schema.sql` in SQL editor → copy URL/keys into `.env`.
 2. `npm install` → `npm run seed` (creates staff users + demo data).
-3. Install Ollama → `ollama pull qwen2.5:3b` → test one extraction.
-4. Build whisper.cpp → download `ggml-small.bin` into `models/` → install ffmpeg → test one Tamil and one English recording.
+3. Server laptop only: `npm run setup-ai` downloads the AI and speech models into `models/` (~2.5 GB, once). Other machines skip this and use the keyword fallback.
+4. Test one Tamil and one English recording.
 5. `npm run dev`.
-6. Demo mode: `npm run build && npm start` → `cloudflared tunnel --url http://localhost:3000` → open the HTTPS URL on phones (HTTPS is required for GPS, microphone and PWA install).
+6. Demo mode: `npm run build && npm start` → `npm run tunnel` → open the HTTPS URL on phones (HTTPS is required for GPS, microphone and PWA install).
 
 ---
 
@@ -716,9 +714,9 @@ The demo flood incident is **not** seeded; it is created live during the demo.
 
 | Hours | Phase | Deliverable | Owners |
 |---|---|---|---|
-| 0–2 | A. Foundation | Repo, all files created as empty stubs, `shared/types.ts` + `constants.ts` complete, `App.tsx` routes, `data/index.ts` Api interface, Supabase schema + seed, Ollama + Whisper + ffmpeg tested, HTTPS tunnel tested on a phone | Lead + Backend |
+| 0–2 | A. Foundation | Repo, all files created as empty stubs, `shared/types.ts` + `constants.ts` complete, `App.tsx` routes, `data/index.ts` Api interface, Supabase schema + seed, local LLM + Whisper tested, HTTPS tunnel tested on a phone | Lead + Backend |
 | 2–8 | B. UI | Every screen built against the `Api` interface; all `shared/` rule functions + tests | Everyone |
-| 8–15 | C. Real backend | All server routes + pipeline (keywords path first, then Ollama, then Whisper); replace `realApi.ts` stubs with fetch calls | Backend, Lead |
+| 8–15 | C. Real backend | All server routes + pipeline (keywords path first, then the local LLM, then Whisper); replace `realApi.ts` stubs with fetch calls | Backend, Lead |
 | 15–18 | D. Secondary | Escalation, resources, fake OTP, nearby banner, live dictation | Assigned owners |
 | 18–21 | E. Testing | Full demo on 2 phones + laptop incl. airplane mode; fix bugs | Everyone |
 | 21–24 | F. Demo prep | Reset works, demo script rehearsed, backup video recorded. **No new features after hour 21.** | Everyone |
@@ -741,7 +739,7 @@ The demo flood incident is **not** seeded; it is created live during the demo.
 
 | Risk | Fallback | Cut order if late |
 |---|---|---|
-| Ollama slow/bad JSON | Keyword extractor (automatic) | Use keywords only |
+| Local LLM slow/bad JSON | Keyword extractor (automatic) | Use keywords only |
 | Whisper slow/inaccurate (Tamil) | `small` model; admin plays audio; keyboard mic | Cut live dictation (F24) |
 | Venue internet down (Supabase is cloud) | Phone hotspot for laptop; backup video | — |
 | GPS/mic blocked | HTTPS tunnel from hour 1; text location field | — |

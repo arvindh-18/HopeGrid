@@ -6,3 +6,4 @@ tmp/
 # Local model files (whisper/ollama) are large and machine-specific
 models/*
 !models/.gitkeep
+.DS_Store

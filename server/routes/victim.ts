@@ -1,12 +1,17 @@
-// server/routes/victim.ts — victim routes, no login (architecture §8.2).
-// F01: POST /api/reports. Tracking and phone verification (F04, F21) are added later.
+// server/routes/victim.ts — victim routes, no login (architecture §8.2):
+// POST /api/reports (F01), /api/track (F04), /api/track/verify-phone (F21).
 import { Router } from 'express';
 import {
-  CODE_ALPHABET, MAX_AUDIO_BASE64, MAX_AUDIO_SECONDS, MAX_PEOPLE, MAX_PHOTO_BASE64, MIN_REPORT_TEXT,
+  CODE_ALPHABET, DEMO_OTP, MAX_AUDIO_BASE64, MAX_AUDIO_SECONDS, MAX_PEOPLE, MAX_PHOTO_BASE64, MIN_REPORT_TEXT,
   PHONE_MAX_DIGITS, PHONE_MIN_DIGITS, PIN_LENGTH, REPORT_CODE_LENGTH,
 } from '../../shared/constants';
-import { ApiError, NEEDS, type Need, type ReportSubmission } from '../../shared/types';
-import { submissionToReportRow } from '../mappers';
+import { victimStep } from '../../shared/trackingStatus';
+import {
+  ApiError, CHAT_OPEN_ASSIGNMENT, NEEDS,
+  type IncidentRecord, type LogRecord, type Need, type ReportRecord, type ReportSubmission, type TrackView,
+} from '../../shared/types';
+import { fromRow, fromRows, submissionToReportRow } from '../mappers';
+import { addLog, assignmentsOf, getIncident, processReport, recomputeIncident } from '../pipeline';
 import { uploadBase64 } from '../storage';
 import { db } from '../supabase';
 
@@ -17,7 +22,7 @@ const CODE_RE = new RegExp(`^[${CODE_ALPHABET}]{${REPORT_CODE_LENGTH}}$`);
 const PIN_RE = new RegExp(`^\\d{${PIN_LENGTH}}$`);
 const PHONE_RE = new RegExp(`^\\+?\\d{${PHONE_MIN_DIGITS},${PHONE_MAX_DIGITS}}$`);
 // Storage paths allow audio.{webm|mp4|ogg} (architecture §6.7); MediaRecorder may add ";codecs=…".
-const AUDIO_EXT_RE = /^audio\/(webm|mp4|ogg)(;.*)?$/;
+export const AUDIO_EXT_RE = /^audio\/(webm|mp4|ogg)(;.*)?$/;
 
 const invalid = (message: string) => new ApiError('VALIDATION', message);
 const isStr = (v: unknown): v is string => typeof v === 'string';
@@ -137,5 +142,65 @@ victimRouter.post('/reports', async (req, res) => {
   }
 
   res.status(201).json({ ok: true, code: sub.code });
-  // Processing (processReport, not awaited) is added with F05 — the report stays PENDING until then (D9).
+  void processReport(sub.id); // not awaited (architecture D9)
+});
+
+// ---------------------------------------------------------------- tracking (F04) and phone verification (F21)
+
+/** Victim routes authenticate with code + PIN. Wrong pair → 401 with the Track page's message (F04). */
+export async function victimReport(body: unknown): Promise<ReportRecord> {
+  const b = (body ?? {}) as Record<string, unknown>;
+  const code = isStr(b.code) ? b.code.trim().toUpperCase() : '';
+  const pin = isStr(b.pin) ? b.pin.trim() : '';
+  if (!code || !pin) throw invalid('Enter your code and PIN.');
+  const { data, error } = await db.from('reports').select('*').eq('code', code).eq('pin', pin).maybeSingle();
+  if (error) throw new Error(`Report lookup failed: ${error.message}`);
+  if (!data) throw new ApiError('UNAUTHORIZED', 'Code or PIN not found. Check and try again.');
+  return fromRow<ReportRecord>(data);
+}
+
+/** The report's live incident. Reports move on merge, so incident_id always points at the current one. */
+export async function victimIncident(r: ReportRecord): Promise<IncidentRecord | null> {
+  return r.incidentId ? getIncident(r.incidentId) : null;
+}
+
+// POST /api/track {code, pin} → TrackView
+victimRouter.post('/track', async (req, res) => {
+  const r = await victimReport(req.body);
+  const i = await victimIncident(r);
+  const assignments = i ? await assignmentsOf(i.id) : [];
+  let messages: TrackView['messages'] = [];
+  if (i) {
+    const { data, error } = await db.from('incident_logs').select('*').eq('incident_id', i.id).eq('public', true).order('created_at', { ascending: false });
+    if (error) throw new Error(`Log lookup failed: ${error.message}`);
+    messages = fromRows<LogRecord>(data).map((l) => ({ at: l.createdAt, text: l.text }));
+  }
+  const view: TrackView = {
+    code: r.code,
+    step: victimStep({
+      processingStatus: r.processingStatus,
+      incident: i ? { status: i.status, verifiedAt: i.verifiedAt } : null,
+      assignments,
+    }),
+    updatedAt: i?.updatedAt ?? r.receivedAt,
+    messages,
+    phoneVerified: r.phoneVerified,
+    chatOpen: assignments.some((a) => CHAT_OPEN_ASSIGNMENT.includes(a.status)),
+  };
+  res.json(view);
+});
+
+// POST /api/track/verify-phone {code, pin, phone, otp} — BR-140 (no SMS is sent).
+victimRouter.post('/track/verify-phone', async (req, res) => {
+  const r = await victimReport(req.body);
+  const phone = isStr(req.body.phone) ? req.body.phone.replace(/\s+/g, '') : '';
+  if (!PHONE_RE.test(phone)) throw invalid(`Phone number must be ${PHONE_MIN_DIGITS}–${PHONE_MAX_DIGITS} digits, optionally starting with +.`);
+  if (!isStr(req.body.otp) || req.body.otp.trim() !== DEMO_OTP) throw invalid('That code is not correct. Check it and try again.');
+  const { error } = await db.from('reports').update({ phone, phone_verified: true }).eq('id', r.id);
+  if (error) throw new Error(`Report update failed: ${error.message}`);
+  if (r.incidentId) {
+    await addLog(r.incidentId, 'Reporter phone verified', false);
+    await recomputeIncident(r.incidentId);
+  }
+  res.json({ ok: true });
 });
