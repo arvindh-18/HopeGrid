@@ -1,7 +1,7 @@
 // src/components/Layout.tsx — header, role navigation, offline banner, emergency banner, demo menu.
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { EMERGENCY_NUMBER, api, devTools } from '../data';
+import { EMERGENCY_NUMBER, api } from '../data';
 import { homeFor, useAuth } from '../hooks/useAuth';
 import { isForcedOffline, setForcedOffline, useOnline } from '../offline/useOnline';
 import { IconClose, IconFlask, IconMenu, IconPhone, IconWifiOff } from './Icons';
@@ -116,17 +116,14 @@ export function Layout({ variant = 'public', emergency, width = 'narrow', childr
   );
 }
 
-// ---------- Demo menu (mock mode, or DEV builds) — features.md F23 ----------
+// ---------- Demo menu (DEV builds only) — features.md F23 ----------
 function DemoMenu() {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [offline, setOffline] = useState(isForcedOffline());
-  const [realLoc, setRealLoc] = useState(devTools?.usingRealLocation() ?? false);
-  const { login } = useAuth();
   const navigate = useNavigate();
   const toast = useToast();
-  const dev = devTools;
-  if (!dev && !import.meta.env.DEV) return null;
+  if (!import.meta.env.DEV) return null;
 
   async function run(fn: () => Promise<void>, done: string) {
     setBusy(true);
@@ -138,19 +135,10 @@ function DemoMenu() {
       {open && (
         <div className="w-72 rounded-[16px] bg-white p-4 shadow-[var(--shadow-overlay)]">
           <p className="t-title-sm mb-1">Demo</p>
-          <p className="t-caption mb-3">{dev ? 'Mock data mode — nothing leaves this browser.' : 'Development build.'}</p>
+          <p className="t-caption mb-3">Development build.</p>
           <div className="flex flex-col gap-2">
-            <button type="button" className="btn btn-outline btn-sm" disabled={busy} onClick={() => run(async () => { dev ? await dev.reset() : await api.resetDemo(); navigate('/'); }, 'Demo data reset')}>Reset demo data</button>
-            {dev && (
-              <>
-                <button type="button" className="btn btn-outline btn-sm" disabled={busy} onClick={() => run(async () => { await dev.injectSecondReport(); }, 'Second report sent from another phone')}>Inject second report</button>
-                <button type="button" className="btn btn-outline btn-sm" disabled={busy} onClick={() => run(async () => { await login(dev.accounts.admin, dev.accounts.password); navigate('/admin'); }, 'Signed in as Coordinator')}>Switch to Admin</button>
-                <button type="button" className="btn btn-outline btn-sm" disabled={busy} onClick={() => run(async () => { await login(dev.accounts.volunteer, dev.accounts.password); navigate('/volunteer'); }, 'Signed in as Ravi')}>Switch to Volunteer (Ravi)</button>
-                <label className="mt-1 flex items-center justify-between gap-3 text-[14px]">Simulate offline <Toggle label="Simulate offline" checked={offline} onChange={(v) => { setForcedOffline(v); setOffline(v); }} /></label>
-                <label className="flex items-center justify-between gap-3 text-[14px]">Use my real GPS <Toggle label="Use my real GPS" checked={realLoc} onChange={(v) => { dev.setUseRealLocation(v); setRealLoc(v); }} /></label>
-                <button type="button" className="btn btn-ghost btn-sm justify-start" onClick={() => { dev.failNextRequest(); toast('The next request will fail', 'info'); }}>Make next request fail</button>
-              </>
-            )}
+            <button type="button" className="btn btn-outline btn-sm" disabled={busy} onClick={() => run(async () => { await api.resetDemo(); navigate('/'); }, 'Demo data reset')}>Reset demo data</button>
+            <label className="mt-1 flex items-center justify-between gap-3 text-[14px]">Simulate offline <Toggle label="Simulate offline" checked={offline} onChange={(v) => { setForcedOffline(v); setOffline(v); }} /></label>
           </div>
         </div>
       )}

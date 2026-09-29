@@ -1,5 +1,5 @@
 // src/data/realApi.ts — Phase C implementation of the Api interface (fetch to /api/*).
-// UI-SKELETON PHASE: every function is a stub that names its endpoint (architecture.md §8.2).
+// Every function is currently a stub that names its endpoint (architecture.md §8.2).
 // Phase C task: replace each stub with a fetch call that sends `Authorization: Bearer ${getToken()}`
 // on admin/volunteer routes, parses the error envelope into ApiError, and maps network failures to
 // ApiError('NETWORK'). Pages and components must not change when this file is filled in.
@@ -7,7 +7,7 @@ import { ApiError } from '../../shared/types';
 import type { Api } from './index';
 
 function notConnected(endpoint: string): never {
-  throw new ApiError('SERVER_ERROR', `The server is not connected yet (${endpoint}). Run with VITE_USE_MOCK=true.`);
+  throw new ApiError('SERVER_ERROR', `The server is not connected yet (${endpoint}).`);
 }
 
 export const realApi: Api = {

@@ -34,7 +34,6 @@ export const NEARBY_RADIUS_M = 2000;
 export const RECENT_REPORT_MINUTES = 60;
 export const OFFLINE_SUBMIT_THRESHOLD_MIN = 2;
 export const SIGNED_URL_SECONDS = 3600;
-export const MOCK_LATENCY_MS = 300;
 
 export const CONFIDENCE = {
   BASE: 35,

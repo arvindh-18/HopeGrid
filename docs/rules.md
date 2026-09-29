@@ -21,9 +21,9 @@
 
 ## A2. Code boundaries
 - **AR-10** All types and enums live in `shared/types.ts`; all numbers/thresholds/weights in `shared/constants.ts`. No magic numbers elsewhere.
-- **AR-11** All business rules (extraction fallback, scores, duplicates, related incidents, matching, public view, tracking step) live only in `shared/*.ts` as pure functions, and are used by both `server/` and `src/data/mockApi.ts`. Never re-implement them elsewhere.
-- **AR-12** Pages and components get data only through `api` from `src/data/index.ts`. No `fetch` in pages/components. No imports of `mockApi`, `realApi` or `mockData` outside `src/data/`.
-- **AR-13** Mock data lives only in `src/data/mockData.ts`. No hardcoded datasets inside components.
+- **AR-11** All business rules (extraction fallback, scores, duplicates, related incidents, matching, public view, tracking step) live only in `shared/*.ts` as pure functions, and are used by `server/` (and by the frontend where it needs them). Never re-implement them elsewhere.
+- **AR-12** Pages and components get data only through `api` from `src/data/index.ts`. No `fetch` in pages/components. No imports of `realApi` outside `src/data/`.
+- **AR-13** No hardcoded datasets inside components. Seed data lives only in the server seed script (architecture.md §12).
 - **AR-14** Only the server talks to Supabase. The frontend must never import `@supabase/supabase-js` or know any Supabase key.
 - **AR-15** DB ↔ API naming conversion happens only in `server/mappers.ts` (DB `snake_case`, API/TS `camelCase`).
 - **AR-16** Status changes go only through the transitions in BR-100…BR-104. Validate the current status on the server before every change and return `INVALID_STATE` otherwise.
@@ -41,7 +41,7 @@
 ## A4. Quality and process
 - **AR-30** Every data-driven screen has loading, empty and error states.
 - **AR-31** Any change to `shared/*.ts` must include or update tests in `tests/rules.test.ts`. Tests never call Ollama, Whisper or Supabase.
-- **AR-32** Before reporting done: run `npm run test` and type-check, click through the feature in mock mode, and (if the backend exists) in real mode.
+- **AR-32** Before reporting done: run `npm run test` and type-check, and click through the feature against the real backend.
 - **AR-33** Do not commit, push or merge unless explicitly told to.
 - **AR-34** Report when finished: files created, files modified, tests run and results, acceptance checks passed/failed, unresolved errors, assumptions made.
 - **AR-35** Keep it simple: no state-management libraries, no websockets/realtime, no ORMs, no extra services. Prefer the simplest code that satisfies the acceptance checks.
@@ -471,7 +471,7 @@ Availability: a volunteer may set AVAILABLE or OFFLINE only while they have no A
 **BR-140 Phone verification:**
 - Requires a valid code + PIN and `otp === DEMO_OTP`.
 - Sets `phone` and `phone_verified = true` on the report, logs, and recomputes the incident.
-- No SMS is sent. The "Demo code" hint is shown only in mock mode or when DEV_MODE is on.
+- No SMS is sent. The "Demo code" hint is shown only in DEV builds or when DEV_MODE is on.
 
 ---
 
@@ -498,7 +498,6 @@ Availability: a volunteer may set AVAILABLE or OFFLINE only while they have no A
 | RECENT_REPORT_MINUTES | 60 |
 | OFFLINE_SUBMIT_THRESHOLD_MIN | 2 (shows "sent while offline") |
 | SIGNED_URL_SECONDS | 3600 |
-| MOCK_LATENCY_MS | 300 |
 | CONFIDENCE weights | BASE 35, EXTRA_REPORT 20, EXTRA_REPORT_MAX 40, PHOTO 15, RECENT 10, PHONE 5, CORROBORATED 20, MAX 99 |
 | PRIORITY weights | PEOPLE_5PLUS 20, PEOPLE_2TO4 12, PEOPLE_1_OR_UNKNOWN 6, TRAPPED 25, VULNERABLE 15, MEDICAL 20, DANGER 15, SEVERE_TYPE 10 |
 | PRIORITY thresholds | CRITICAL 70, HIGH 45, MEDIUM 20 |
@@ -517,7 +516,7 @@ Availability: a volunteer may set AVAILABLE or OFFLINE only while they have no A
 - UI text: short, calm, plain English; no technical terms on victim screens.
 
 ## C3. Definition of done (every task)
-1. Acceptance checks in `features.md` pass in mock mode (and real mode if the backend is available).
+1. Acceptance checks in `features.md` pass against the real backend.
 2. The rules referenced by the feature are implemented exactly and unit-tested where in `shared/`.
 3. No rule in Part A is broken (import boundaries, privacy, offline report page).
 4. Loading, empty and error states exist.
@@ -536,4 +535,3 @@ Availability: a volunteer may set AVAILABLE or OFFLINE only while they have no A
 - **Related incident** — shown because of the cascade table, distance and time; never stored, never merged.
 - **Public view** — the only form in which incidents leave the system to anonymous users.
 - **Outbox** — the phone's IndexedDB queue of reports waiting to be sent.
-- **Mock mode** — `VITE_USE_MOCK=true`; the full product runs in the browser with `mockApi` and no server.

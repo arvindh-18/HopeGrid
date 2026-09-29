@@ -33,8 +33,7 @@ There is no self-registration. All staff accounts are created by the seed script
 ┌──────────────────────────── React PWA (one app) ────────────────────────────┐
 │ Pages/components                                                             │
 │      │ (only through)                                                        │
-│ src/data/index.ts  ──►  mockApi.ts (VITE_USE_MOCK=true, UI phase)            │
-│                    └─►  realApi.ts (fetch /api/*)                            │
+│ src/data/index.ts  ──►  realApi.ts (fetch /api/*)                            │
 │ src/offline/outbox.ts (IndexedDB) → sends queued reports when online         │
 └───────────────────────────────┬──────────────────────────────────────────────┘
                                 │ HTTPS (cloudflared/ngrok tunnel to laptop)
@@ -55,11 +54,11 @@ There is no self-registration. All staff accounts are created by the seed script
 
 | # | Decision | Reason |
 |---|---|---|
-| D1 | One repo, one `package.json`. Folders: `src/` (frontend), `server/` (backend), `shared/` (plain TS imported by both). | Simplest setup; shared types and rules keep mock and real behaving identically. |
+| D1 | One repo, one `package.json`. Folders: `src/` (frontend), `server/` (backend), `shared/` (plain TS imported by both). | Simplest setup; shared types and rules keep frontend and server behaving identically. |
 | D2 | React + Vite + TypeScript + Tailwind + React Router. | Fast, familiar. |
 | D3 | `vite-plugin-pwa` for app-shell offline only. No custom service worker logic. | The app must open offline; reports are queued by app code, not by the service worker. |
 | D4 | `idb-keyval` for the offline outbox and device ID. | Can store large base64 media; localStorage is too small. |
-| D5 | Express server is the **only** component that talks to Supabase. The frontend never imports `@supabase/supabase-js`. | One boundary; secrets stay on server; mock/real swap stays clean. |
+| D5 | Express server is the **only** component that talks to Supabase. The frontend never imports `@supabase/supabase-js`. | One boundary; secrets stay on server. |
 | D6 | Supabase Postgres with RLS **enabled on every table and no policies**. Server uses the service-role key. | Secure by default with zero policy work. |
 | D7 | Supabase Storage bucket `media`, **private**. Server returns signed URLs (1 hour) only to allowed users. | Victim photos/voice never public. |
 | D8 | Supabase Auth for staff login, called by the server (`/api/auth/login`). Server verifies bearer token on each request. | Real auth with no custom password handling. |
@@ -139,9 +138,7 @@ hopegrid/
 │   ├── index.css
 │   ├── data/
 │   │   ├── index.ts
-│   │   ├── realApi.ts
-│   │   ├── mockApi.ts
-│   │   └── mockData.ts
+│   │   └── realApi.ts
 │   ├── offline/
 │   │   ├── outbox.ts
 │   │   ├── deviceId.ts
@@ -235,10 +232,8 @@ hopegrid/
 |---|---|
 | main.tsx | Render app, register PWA, call `outbox.start()`. |
 | App.tsx | All routes (§5.2). Only the lead edits route definitions. |
-| data/index.ts | Exports `api: Api` = mockApi or realApi based on `VITE_USE_MOCK`. Defines the `Api` interface (§8.3). |
+| data/index.ts | Exports `api: Api` = realApi. Defines the `Api` interface (§8.3). |
 | data/realApi.ts | Implements `Api` with fetch to `/api/*`, attaches bearer token from `useAuth` storage. |
-| data/mockApi.ts | Implements `Api` in memory using `mockData.ts` and the real `shared/` rules. Persists to localStorage key `mockdb`. Includes `resetDemo()`. |
-| data/mockData.ts | Seed fixtures identical in meaning to §12, including canned transcripts. |
 | offline/outbox.ts | Queue, send, retry reports (BR-02). `start()`, `enqueue()`, `list()`, `retryAll()`, `remove(id)`, `subscribe(fn)`. |
 | offline/deviceId.ts | `getDeviceId()` — UUID created on first use, stored in IndexedDB. |
 | offline/useOnline.ts | `navigator.onLine` + events. |
@@ -580,7 +575,7 @@ VolunteerAssignment = { id, status, reason, updatedAt,
 
 ### 8.3 Frontend `Api` interface (`src/data/index.ts`)
 
-Both `mockApi` and `realApi` implement exactly these functions with the types above:
+`realApi` implements exactly these functions with the types above:
 
 ```text
 submitReport(sub)            track(code, pin)             verifyPhone(code, pin, phone, otp)
@@ -619,7 +614,6 @@ Errors are thrown as `ApiError {code, message}` in both implementations.
 | FFMPEG_BIN | server | ffmpeg | |
 | DEV_MODE | server | true | enables /api/dev/reset and demo OTP hint |
 | EMERGENCY_NUMBER | server | 112 | |
-| VITE_USE_MOCK | frontend | true | true = mockApi, false = realApi |
 | VITE_EMERGENCY_NUMBER | frontend | 112 | |
 
 In Supabase project settings set **JWT expiry = 86400 seconds** so staff tokens last the whole demo.
@@ -632,7 +626,7 @@ In Supabase project settings set **JWT expiry = 86400 seconds** so staff tokens 
 2. `npm install` → `npm run seed` (creates staff users + demo data).
 3. Install Ollama → `ollama pull qwen2.5:3b` → test one extraction.
 4. Build whisper.cpp → download `ggml-small.bin` into `models/` → install ffmpeg → test one Tamil and one English recording.
-5. `npm run dev` (mock or real).
+5. `npm run dev`.
 6. Demo mode: `npm run build && npm start` → `cloudflared tunnel --url http://localhost:3000` → open the HTTPS URL on phones (HTTPS is required for GPS, microphone and PWA install).
 
 ---
@@ -691,7 +685,7 @@ DONE / UNABLE / CANCELLED / incident RESOLVED → chat closed (read-only history
 
 ---
 
-## 12. Seed data (server/scripts/seed.ts and src/data/mockData.ts — same meaning)
+## 12. Seed data (server/scripts/seed.ts)
 
 Demo centre point: lat 13.0405, lng 80.2337 ("Central Street").
 
@@ -715,7 +709,6 @@ Demo centre point: lat 13.0405, lng 80.2337 ("Central Street").
 
 The demo flood incident is **not** seeded; it is created live during the demo.
 
-**Mock-only extras (mockData.ts):** canned transcript used for any voice note in mock mode: "Flood water has entered our house. My grandmother cannot walk and we are stuck upstairs." A mock "inject second report" action (DevToolbar button inside Layout when `VITE_USE_MOCK=true`) submits: "Several people are trapped near Central Street" from a different deviceId at the demo centre.
 
 ---
 
@@ -724,8 +717,8 @@ The demo flood incident is **not** seeded; it is created live during the demo.
 | Hours | Phase | Deliverable | Owners |
 |---|---|---|---|
 | 0–2 | A. Foundation | Repo, all files created as empty stubs, `shared/types.ts` + `constants.ts` complete, `App.tsx` routes, `data/index.ts` Api interface, Supabase schema + seed, Ollama + Whisper + ffmpeg tested, HTTPS tunnel tested on a phone | Lead + Backend |
-| 2–8 | B. UI on mocks | Every screen working with `VITE_USE_MOCK=true`; all `shared/` rule functions + tests | Everyone |
-| 8–15 | C. Real backend | All server routes + pipeline (keywords path first, then Ollama, then Whisper); switch `VITE_USE_MOCK=false` | Backend, Lead |
+| 2–8 | B. UI | Every screen built against the `Api` interface; all `shared/` rule functions + tests | Everyone |
+| 8–15 | C. Real backend | All server routes + pipeline (keywords path first, then Ollama, then Whisper); replace `realApi.ts` stubs with fetch calls | Backend, Lead |
 | 15–18 | D. Secondary | Escalation, resources, fake OTP, nearby banner, live dictation | Assigned owners |
 | 18–21 | E. Testing | Full demo on 2 phones + laptop incl. airplane mode; fix bugs | Everyone |
 | 21–24 | F. Demo prep | Reset works, demo script rehearsed, backup video recorded. **No new features after hour 21.** | Everyone |
@@ -753,6 +746,6 @@ The demo flood incident is **not** seeded; it is created live during the demo.
 | Venue internet down (Supabase is cloud) | Phone hotspot for laptop; backup video | — |
 | GPS/mic blocked | HTTPS tunnel from hour 1; text location field | — |
 | Map tiles fail | List view | — |
-| Out of time | Mock mode runs full demo | Nearby banner → fake OTP → resources → escalation → related incidents → voice messages in chat |
+| Out of time | Backup video | Nearby banner → fake OTP → resources → escalation → related incidents → voice messages in chat |
 
 **Never cut:** F01 report, F02 offline, F03 voice note, F05 AI/keywords, F06 incident, F09/F10 scores, F12–F14 admin, F15–F16 volunteer, F17 chat, F19 public map.

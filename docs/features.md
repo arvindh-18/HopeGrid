@@ -2,7 +2,7 @@
 
 > **Purpose of this file:** WHAT to build: every feature (`F01`–`F24`), every screen (`S01`–`S11`), acceptance checks, and the demo scenario that proves the product works.
 > **Structure, files, database and API:** see `architecture.md`. **Behaviour rules (`BR-*`) and agent rules (`AR-*`):** see `rules.md`.
-> A feature is done only when every acceptance check passes in **both** mock mode (`VITE_USE_MOCK=true`) and real mode (`false`), unless marked "real mode only".
+> A feature is done only when every acceptance check passes against the real backend.
 
 ---
 
@@ -32,7 +32,7 @@
 | F20 | Resources (list, add, edit, allocate) | SHOULD | Admin | pages/admin/Resources.tsx, IncidentPage.tsx | F13 |
 | F21 | Fake phone verification (OTP 123456) | SHOULD | Victim | pages/Track.tsx | F04 |
 | F22 | Nearby hazard banner | SHOULD | Community | pages/PublicMap.tsx | F19 |
-| F23 | Mock data layer & demo tools | MUST | Team | src/data/*, Layout.tsx dev buttons | — |
+| F23 | Demo tools | MUST | Team | Layout.tsx dev buttons, `/api/dev/reset` | — |
 | F24 | Live dictation while speaking (online only) | COULD | Victim | hooks/useLiveDictation.ts | F01 |
 
 **Out of scope (do not build):** victim accounts, volunteer self-registration, video upload, push notifications, real SMS, real calls or number masking, real emergency-service integration, offline admin/volunteer actions, multiple volunteers on one incident, undo merge, analytics, translations of the UI.
@@ -72,7 +72,7 @@
 4. S03 preview card shows "Your voice note will be turned into text when it is sent" when a voice note exists.
 5. If microphone permission is denied, show "Microphone blocked — you can use your keyboard's mic button instead" and keep the form usable.
 **Acceptance:**
-- [ ] Record while offline, submit, go online → admin sees audio player and transcript (real mode) or canned transcript (mock mode).
+- [ ] Record while offline, submit, go online → admin sees audio player and transcript.
 - [ ] Voice-only report (no text) can be submitted.
 
 ### F04 — Report tracking (code + PIN)
@@ -137,7 +137,7 @@
 
 ### F11 — Staff login
 **Goal:** admin and volunteers log in with seeded accounts.
-**Behaviour:** S06 email + password + two quick buttons "Demo: Admin", "Demo: Volunteer (Ravi)" that fill credentials (visible only when `VITE_USE_MOCK=true` or DEV mode). After login redirect: ADMIN → `/admin`, VOLUNTEER → `/volunteer`. Logout button in Layout. Token kept in sessionStorage. Mock mode accepts seeded emails with any password.
+**Behaviour:** S06 email + password + two quick buttons "Demo: Admin", "Demo: Volunteer (Ravi)" that fill credentials (visible only in DEV mode). After login redirect: ADMIN → `/admin`, VOLUNTEER → `/volunteer`. Logout button in Layout. Token kept in sessionStorage.
 **Acceptance:**
 - [ ] Volunteer cannot open `/admin` (redirected) and gets 403 from admin API.
 
@@ -227,17 +227,16 @@
 **Acceptance:** [ ] Allocating 50 of 200 water shows 150; allocating more than available shows "Only N available".
 
 ### F21 — Fake phone verification
-**Behaviour:** on S04 when `phoneVerified` is false: "Verify your phone (optional)" → phone input → "Send code" (no SMS; shows hint "Demo code: 123456" when DEV mode or mock) → code input → verify (BR-140).
+**Behaviour:** on S04 when `phoneVerified` is false: "Verify your phone (optional)" → phone input → "Send code" (no SMS; shows hint "Demo code: 123456" in DEV mode) → code input → verify (BR-140).
 **Acceptance:** [ ] After verifying, the incident's confidence gains the phone reason (+5) within one poll.
 
 ### F22 — Nearby hazard banner
 **Behaviour:** on S05, if location is available: "⚠ N active hazards within 2 km" when N > 0 (RED + ORANGE markers within `NEARBY_RADIUS_M`); tapping it switches to list filtered to those.
 **Acceptance:** [ ] Banner hidden when location denied or N = 0.
 
-### F23 — Mock data layer & demo tools
-**Behaviour:** per `architecture.md` §8.3 and §12. When `VITE_USE_MOCK=true`, Layout shows a small floating "Demo" menu: "Reset demo data", "Inject second report", "Switch to Admin", "Switch to Volunteer (Ravi)". In real mode with DEV_MODE, only "Reset demo data" (calls `/api/dev/reset`).
-**Mock behaviour rules:** mockApi must use the real `shared/` functions for extraction, scores, duplicates, related, matching, public view and tracking steps; voice notes get the canned transcript; state persists in localStorage key `mockdb`; every call waits 300 ms.
-**Acceptance:** [ ] The full demo scenario (§4) runs in mock mode with no server.
+### F23 — Demo tools
+**Behaviour:** in DEV builds, Layout shows a small floating "Demo" menu with "Reset demo data" (calls `/api/dev/reset`, server `DEV_MODE` only) and "Simulate offline".
+**Acceptance:** [ ] "Reset demo data" restores the §12 seed via the server.
 
 ### F24 — Live dictation (optional)
 **Behaviour:** if `SpeechRecognition` exists and the device is online, show a small "✍️ Live text" toggle next to the mic; recognized words are appended to the description while recording (language `en-IN`, with a switch for `ta-IN`). The recorded voice note is still attached. Hide entirely when unsupported or offline.

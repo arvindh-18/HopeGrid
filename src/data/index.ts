@@ -1,14 +1,13 @@
 // src/data/index.ts — the ONLY data entry point for pages and components (rules.md AR-12).
-// Chooses mockApi (VITE_USE_MOCK=true, UI phase) or realApi (fetch /api/*, Phase C).
+// Backed by realApi (fetch /api/*).
 import type {
   ChatMessage, ChatThread, IncidentDetail, IncidentListItem, IncidentPatch, OutgoingMessage, PriorityLevel,
   PublicIncident, ReportSubmission, Resource, ResourceInput, SessionUser, TrackView, UnableReason,
   AssignmentStatus, VolunteerAssignment, VolunteerProfile, VolunteerProfilePatch,
 } from '../../shared/types';
-import { mockApi, mockDevTools } from './mockApi';
 import { realApi } from './realApi';
 
-/** architecture.md §8.3 — both implementations provide exactly these functions. Errors are thrown as ApiError. */
+/** architecture.md §8.3 — realApi provides exactly these functions. Errors are thrown as ApiError. */
 export interface Api {
   // Victim
   submitReport(sub: ReportSubmission): Promise<{ ok: true; code: string }>;
@@ -49,15 +48,11 @@ export interface Api {
   resetDemo(): Promise<{ ok: true }>;
 }
 
-export const USE_MOCK = import.meta.env.VITE_USE_MOCK !== 'false';
 export const EMERGENCY_NUMBER: string = import.meta.env.VITE_EMERGENCY_NUMBER || '112';
 
-export const api: Api = USE_MOCK ? mockApi : realApi;
+export const api: Api = realApi;
 
-/** Demo-only helpers (floating Demo menu). null in real mode. */
-export const devTools = USE_MOCK ? mockDevTools : null;
-
-// ---------- Session token (used by realApi as bearer token, by mockApi as the user id) ----------
+// ---------- Session token (sent by realApi as the bearer token) ----------
 const TOKEN_KEY = 'authToken';
 export function getToken(): string | null {
   try { return sessionStorage.getItem(TOKEN_KEY); } catch { return null; }

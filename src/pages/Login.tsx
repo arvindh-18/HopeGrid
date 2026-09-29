@@ -4,7 +4,6 @@ import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { ApiError } from '../../shared/types';
 import { Layout } from '../components/Layout';
 import { Button, Field } from '../components/ui';
-import { devTools } from '../data';
 import { homeFor, useAuth } from '../hooks/useAuth';
 
 export default function Login() {
@@ -37,8 +36,6 @@ export default function Login() {
     }
   }
 
-  const fill = (e: string, p: string) => { setEmail(e); setPassword(p); setError(null); };
-
   return (
     <Layout>
       <div className="mx-auto grid max-w-4xl gap-10 py-4 md:grid-cols-[1fr_420px] md:items-start md:py-10">
@@ -57,16 +54,6 @@ export default function Login() {
           </Field>
           {error && <p className="text-[14px] text-danger" role="alert">{error}</p>}
           <Button type="submit" size="lg" busy={busy}>Log in</Button>
-          {devTools && (
-            <div className="border-t border-strong pt-4">
-              <p className="t-caption mb-2">Demo accounts (password {devTools.accounts.password})</p>
-              <div className="flex flex-wrap gap-2">
-                <button type="button" className="chip" onClick={() => fill(devTools!.accounts.admin, devTools!.accounts.password)}>Coordinator</button>
-                <button type="button" className="chip" onClick={() => fill(devTools!.accounts.volunteer, devTools!.accounts.password)}>Volunteer (Ravi)</button>
-                <button type="button" className="chip" onClick={() => fill('priya@demo.app', devTools!.accounts.password)}>Volunteer (Priya)</button>
-              </div>
-            </div>
-          )}
         </form>
       </div>
     </Layout>

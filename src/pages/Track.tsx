@@ -8,7 +8,7 @@ import { ChatBox } from '../components/ChatBox';
 import { IconCheck } from '../components/Icons';
 import { Layout } from '../components/Layout';
 import { Button, ErrorState, Field, FreshnessLine, LoadingBlock, Notice, clockTime, useToast } from '../components/ui';
-import { EMERGENCY_NUMBER, api, devTools } from '../data';
+import { EMERGENCY_NUMBER, api } from '../data';
 import { usePoll } from '../hooks/usePoll';
 import { VICTIM_QUICK_REPLIES } from '../lib/labels';
 import { useOutbox } from '../offline/outbox';
@@ -103,7 +103,6 @@ function TrackForm({ onSubmit }: { onSubmit: (c: Creds) => void }) {
         {error && <p className="text-[14px] text-danger" role="alert">{error}</p>}
         <Button type="submit" size="lg" busy={busy}>Check status</Button>
       </form>
-      {devTools && <p className="t-caption">Demo: try code <strong className="text-ink">RB7K2M</strong> with PIN <strong className="text-ink">1111</strong>.</p>}
     </>
   );
 }
@@ -266,7 +265,7 @@ function PhoneVerify({ creds, onDone }: { creds: Creds; onDone: () => void }) {
       ) : (
         <form onSubmit={verify} className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end">
           <div className="flex-1">
-            <Field label="Code from SMS" htmlFor="otp" error={error} hint={devTools || import.meta.env.DEV ? 'Demo code: 123456' : undefined}>
+            <Field label="Code from SMS" htmlFor="otp" error={error} hint={import.meta.env.DEV ? 'Demo code: 123456' : undefined}>
               <input id="otp" className="input tracking-[0.2em]" inputMode="numeric" value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="6 digits" />
             </Field>
           </div>

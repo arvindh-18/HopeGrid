@@ -1,5 +1,4 @@
-// src/offline/outbox.ts — offline queue for reports (rules.md BR-02). Real code in every mode:
-// only the final api.submitReport() call differs between mock and real.
+// src/offline/outbox.ts — offline queue for reports (rules.md BR-02). Sends via api.submitReport().
 import { get, set } from 'idb-keyval';
 import { useEffect, useState } from 'react';
 import { OUTBOX_RETRY_MS } from '../../shared/constants';

@@ -1,17 +1,17 @@
 # UI Skeleton Status
 
-Phase: **UI skeleton complete** (mock data, no server). Source of truth: `docs/architecture.md`, `docs/features.md`, `docs/rules.md`; visual language from `docs/DESIGN.md`.
+Phase: **UI skeleton complete**, no server. The mock data layer (`mockApi.ts`, `mockData.ts`) has been removed; `api` now points at the `realApi.ts` stubs. Source of truth: `docs/architecture.md`, `docs/features.md`, `docs/rules.md`; visual language from `docs/DESIGN.md`.
 
 ## Run it
 
 ```bash
 npm install
-npm run dev          # http://localhost:5173  (VITE_USE_MOCK defaults to true)
+npm run dev          # http://localhost:5173  (proxies /api to http://localhost:3000)
 npm test             # 22 rule tests (shared/)
 npm run build        # typecheck + production build + service worker
 ```
 
-Use the lime **Demo** button (bottom-left on desktop, top-right on phones) to reset data, inject the second victim report, switch between Coordinator and Ravi, simulate offline, use real GPS, or make the next request fail.
+In dev builds, the lime **Demo** button (bottom-left on desktop, top-right on phones) can reset demo data (`/api/dev/reset`) or simulate offline.
 
 ## Routes (all from architecture §5.2)
 
@@ -32,7 +32,7 @@ Use the lime **Demo** button (bottom-left on desktop, top-right on phones) to re
 
 Role guard: unauthenticated → `/login`; wrong role → that role's home.
 
-## Journeys verified end-to-end (headless Chromium, production build)
+## Journeys verified end-to-end (headless Chromium, production build — against the former mock layer)
 
 1. Victim reports (text) → code + PIN → tracks → sees "Being reviewed".
 2. Second phone reports nearby with photo + verified phone → flagged as possible duplicate.
@@ -48,14 +48,11 @@ Console: no application errors. Only errors seen are blocked OpenStreetMap tile 
 
 ```
 pages / components  ──>  src/data/index.ts (Api interface, only entry point)
-                              ├── mockApi.ts  (now)   ── mockData.ts, localStorage "mockdb", IndexedDB media
                               └── realApi.ts  (Phase C stubs naming every endpoint)
-shared/  ── real business rules used by mockApi today and by the server later
+shared/  ── business rules for the server
 ```
 
-- No component or page imports `mockApi.ts` or `mockData.ts` (AR-12). All fixtures live in `src/data/mockData.ts`.
-- The mock uses the **real** `shared/` rules: keyword extraction, confidence, priority, escalation, duplicates, related incidents, merge, matching, public view, victim steps.
-- Mock latency 300 ms; "processing" of a new report takes ~1.6 s so the RECEIVED → REVIEWING step is visible.
+- No component or page imports `realApi.ts` directly (AR-12).
 
 ## Components
 
@@ -70,19 +67,14 @@ Canvas #f4f4f4, white cards 16 px radius, dark #212121 nav, black pill primary b
 1. **Extra files not in architecture §5:** `src/components/ui.tsx`, `src/components/Icons.tsx`, `UI_SKELETON_STATUS.md`. Everything else matches the file list.
 2. **Extra dependencies:** `@fontsource/dm-sans`, `@fontsource/plus-jakarta-sans` (self-hosted fonts so S02 needs no network, AR-25).
 3. **Extra error code** `NETWORK` in `shared/types.ts` (offline / fetch failure). Not sent by the server; client-only.
-4. Demo-only helpers (`devTools`) exported from `src/data/index.ts`; `null` when `VITE_USE_MOCK=false`.
-5. In mock mode the device location defaults to the demo centre (13.0405, 80.2337) so duplicates and related incidents line up on any laptop; the Demo menu can switch to real GPS.
-6. Mock extraction is always labelled "Structured by keywords" (no AI in the browser); voice notes get the canned transcript from `mockData.ts`.
-7. The injected second report uses an SVG placeholder photo and is marked phone-verified (demo step 4 shortcut).
-8. The Send report button uses `aria-disabled` and explains what is missing when tapped, instead of a silent disabled button.
-9. Small UI additions: dashboard search box, "New" highlight on the queue, "Reports from this phone" list on Home, demo tracking hint (RB7K2M / 1111).
-10. `server/` and `data/` contain **empty placeholder files** only (merged from the project structure). They follow an earlier JSON-database layout, not the Supabase layout in `docs/architecture.md` v3 — reconcile before backend work.
+4. The Send report button uses `aria-disabled` and explains what is missing when tapped, instead of a silent disabled button.
+5. Small UI additions: dashboard search box, "New" highlight on the queue, "Reports from this phone" list on Home.
+6. `server/` and `data/` contain **empty placeholder files** only (merged from the project structure). They follow an earlier JSON-database layout, not the Supabase layout in `docs/architecture.md` v3 — reconcile before backend work.
 
 ## Known limitations
 
 - Map tiles need the internet; list mode covers offline and blocked tiles.
 - Live dictation (F24) only appears in browsers with SpeechRecognition and while online.
-- Mock data is per-browser (localStorage); two tabs of the same browser share it, two devices do not.
 - Main JS bundle is ~590 kB (Leaflet + React); acceptable for the hackathon, code-split later if needed.
 
 ## Integration points — files that change per real feature
@@ -99,6 +91,6 @@ Canvas #f4f4f4, white cards 16 px radius, dark #212121 nav, black pill primary b
 | F10/F16 volunteer | `realApi.*`, `server/routes/volunteer.ts` | volunteer pages |
 | F17 chat | `realApi.*Chat*/send*`, `server/routes/victim.ts` + `volunteer.ts` | ChatBox.tsx |
 | F19/F20 public map | `realApi.getPublicIncidents`, `server/routes/public.ts` (uses `shared/publicView.ts`) | PublicMap.tsx, SafetyMap.tsx |
-| F22 seed | `server/scripts/seed.ts` (same meaning as `mockData.ts`) | — |
+| F22 seed | `server/scripts/seed.ts` (architecture.md §12) | — |
 
-Switching over: set `VITE_USE_MOCK=false` once `realApi.ts` stubs are replaced with fetch calls to the endpoints already named in each stub.
+Connecting: replace the `realApi.ts` stubs with fetch calls to the endpoints already named in each stub.
