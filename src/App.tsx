@@ -4,6 +4,7 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-route
 import type { Role } from '../shared/types';
 import { Spinner, ToastProvider } from './components/ui';
 import { AuthProvider, homeFor, useAuth } from './hooks/useAuth';
+import { LanguageProvider } from './i18n';
 import Home from './pages/Home';
 import Login from './pages/Login';
 import NotFound from './pages/NotFound';
@@ -30,6 +31,7 @@ function RequireRole({ role, children }: { role: Role; children: ReactNode }) {
 export default function App() {
   return (
     <BrowserRouter>
+      <LanguageProvider>
       <AuthProvider>
         <ToastProvider>
           <Routes>
@@ -48,6 +50,7 @@ export default function App() {
           </Routes>
         </ToastProvider>
       </AuthProvider>
+      </LanguageProvider>
     </BrowserRouter>
   );
 }

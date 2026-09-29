@@ -91,6 +91,8 @@
 
 - **Type:** count keyword hits per type and pick the **hazard** type with the most hits. If there are no hazard hits, use the situation type with the most hits. If nothing matches, use `OTHER`.
 
+Hindi keywords (Devanagari and Hinglish) are listed in `shared/keywordExtractor.ts`; ASCII and Devanagari keywords match whole words, Tamil script matches inside words (Tamil joins suffixes).
+
 | Type | Keywords (English / Tamil / Tanglish) |
 |---|---|
 | FLOOD | flood, flooded, flooding, water entered, water entering, submerged, drowning, waterlogged, வெள்ளம், vellam |
@@ -149,7 +151,8 @@
 **BR-12 Transcription.**
 - If a report has audio: `transcribe()` with language auto-detect and timeout `WHISPER_TIMEOUT_MS`.
 - Success → `transcript`, `transcript_status = DONE`. Failure → `transcript_status = FAILED` and an admin log line "Voice note could not be transcribed — listen to it".
-- Processing continues either way. The description given to AI is `text + "\n" + transcript` (whichever parts exist).
+- Non-English speech (Whisper-detected language ≠ `en`) gets a second Whisper pass with `translate: true`. The stored `transcript` is the original text plus `"\n\nEnglish: " + translation`. A failed translation only drops the English line.
+- Processing continues either way. The description given to AI is `text + "\n" + spoken text`, plus `"(English machine translation, may be inaccurate: …)"` when there is one — the AI reads both, because a poor translation can lose facts the original keeps.
 
 **BR-13 Victim input overrides AI and creates the incident.**
 - If the victim entered `people`, it replaces `extraction.people`. Victim-entered `needs` are merged (union) with extraction needs.

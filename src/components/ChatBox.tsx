@@ -2,6 +2,7 @@
 // Shows labels only ("You", "Volunteer", "Reporter 1"); never names or phone numbers.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChatMessage, ChatThread, MessageSender, OutgoingMessage } from '../../shared/types';
+import { useI18n } from '../i18n';
 import { getPosition, mapsLink } from '../lib/geo';
 import { useOnline } from '../offline/useOnline';
 import { IconExternal, IconPin, IconSend } from './Icons';
@@ -35,6 +36,7 @@ function beep() {
 
 export function ChatBox({ threads, open, viewer, onSend, quickReplies = [], allowShareLocation, emptyText }: Props) {
   const online = useOnline();
+  const { t, server } = useI18n();
   const [active, setActive] = useState(threads[0]?.reportId ?? '');
   const [text, setText] = useState('');
   const [voice, setVoice] = useState<VoiceNote | null>(null);
@@ -67,15 +69,15 @@ export function ChatBox({ threads, open, viewer, onSend, quickReplies = [], allo
   }, [messages.length, active]);
 
   const label = (m: ChatMessage): string => {
-    if (viewer === 'ADMIN') return m.sender === 'VOLUNTEER' ? 'Volunteer' : thread?.label ?? 'Reporter';
-    if (m.sender === viewer) return 'You';
-    return m.sender === 'VOLUNTEER' ? 'Volunteer' : thread?.label ?? 'Reporter';
+    if (viewer === 'ADMIN') return m.sender === 'VOLUNTEER' ? t('chat.volunteer') : thread?.label ?? t('chat.reporter');
+    if (m.sender === viewer) return t('chat.you');
+    return m.sender === 'VOLUNTEER' ? t('chat.volunteer') : thread?.label ?? t('chat.reporter');
   };
 
   async function send(msg: OutgoingMessage) {
     if (!onSend || !thread) return;
     if (!online) {
-      setError("You're offline — message not sent.");
+      setError(t('chat.offline'));
       return;
     }
     setSending(true);
@@ -85,7 +87,7 @@ export function ChatBox({ threads, open, viewer, onSend, quickReplies = [], allo
       setText('');
       setVoice(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Message not sent.');
+      setError(e instanceof Error ? server(e.message) : t('chat.notSent'));
     } finally {
       setSending(false);
     }
@@ -96,7 +98,7 @@ export function ChatBox({ threads, open, viewer, onSend, quickReplies = [], allo
       const p = await getPosition();
       await send({ lat: p.lat, lng: p.lng });
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Location is not available.');
+      setError(e instanceof Error ? server(e.message) : t('err.geoUnavailable'));
     }
   }
 
@@ -119,7 +121,7 @@ export function ChatBox({ threads, open, viewer, onSend, quickReplies = [], allo
       <div ref={listRef} className="flex max-h-[360px] min-h-[120px] flex-col gap-2 overflow-y-auto rounded-[12px] bg-canvas p-3" aria-live="polite">
         {messages.length === 0 && (
           <p className="m-auto max-w-xs text-center t-body-sm text-muted">
-            {emptyText ?? (open ? 'No messages yet. Say where you are or what you need.' : 'No messages were sent.')}
+            {emptyText ?? (open ? t('chat.empty') : t('chat.emptyClosed'))}
           </p>
         )}
         {messages.map((m) => {
@@ -130,7 +132,7 @@ export function ChatBox({ threads, open, viewer, onSend, quickReplies = [], allo
               <div className={`rounded-[14px] px-3.5 py-2 text-[15px] ${own ? 'bg-dark text-white' : 'bg-white text-body'}`}>
                 {m.lat !== null && m.lng !== null ? (
                   <a href={mapsLink(m.lat, m.lng)} target="_blank" rel="noreferrer" className={`inline-flex items-center gap-1.5 ${own ? 'text-lime' : 'text-link'}`}>
-                    <IconPin size={16} /> Location shared — Open in Maps <IconExternal size={14} />
+                    <IconPin size={16} /> {t('chat.locationShared')} <IconExternal size={14} />
                   </a>
                 ) : (
                   m.text && <p className="whitespace-pre-wrap">{m.text}</p>
@@ -145,13 +147,13 @@ export function ChatBox({ threads, open, viewer, onSend, quickReplies = [], allo
       {readOnly ? (
         <p className="t-caption">{viewer === 'ADMIN' ? 'Read-only view for coordinators.' : ''}</p>
       ) : !open ? (
-        <p className="rounded-[12px] bg-canvas px-4 py-3 t-body-sm text-muted">Chat closed</p>
+        <p className="rounded-[12px] bg-canvas px-4 py-3 t-body-sm text-muted">{t('chat.closed')}</p>
       ) : (
         <>
           <div className="flex flex-wrap gap-2">
             {allowShareLocation && (
               <button type="button" className="chip" onClick={shareLocation} disabled={sending}>
-                <IconPin size={16} /> Share my location
+                <IconPin size={16} /> {t('chat.shareLoc')}
               </button>
             )}
             {quickReplies.map((q) => (
@@ -162,15 +164,15 @@ export function ChatBox({ threads, open, viewer, onSend, quickReplies = [], allo
             <div className="flex items-center gap-2">
               <div className="flex-1"><VoiceRecorder compact value={voice} onChange={setVoice} /></div>
               <button type="button" className="btn btn-primary" disabled={sending} onClick={() => send({ audioBase64: voice.base64, audioMime: voice.mime })}>
-                {sending ? <Spinner size={16} /> : <IconSend size={16} />} Send
+                {sending ? <Spinner size={16} /> : <IconSend size={16} />} {t('chat.send')}
               </button>
             </div>
           ) : (
             <form className="flex items-center gap-2" onSubmit={(e) => { e.preventDefault(); if (text.trim()) void send({ text }); }}>
               <VoiceRecorder compact value={null} onChange={setVoice} disabled={sending} />
-              <label className="sr-only" htmlFor="chat-input">Message</label>
-              <input id="chat-input" className="input flex-1 !rounded-full" placeholder="Type a message" value={text} onChange={(e) => setText(e.target.value)} maxLength={500} />
-              <button type="submit" aria-label="Send message" className="grid h-11 w-11 flex-none place-items-center rounded-full bg-ink text-white disabled:opacity-40" disabled={sending || !text.trim()}>
+              <label className="sr-only" htmlFor="chat-input">{t('chat.message')}</label>
+              <input id="chat-input" className="input flex-1 !rounded-full" placeholder={t('chat.typePh')} value={text} onChange={(e) => setText(e.target.value)} maxLength={500} />
+              <button type="submit" aria-label={t('chat.sendAria')} className="grid h-11 w-11 flex-none place-items-center rounded-full bg-ink text-white disabled:opacity-40" disabled={sending || !text.trim()}>
                 {sending ? <Spinner size={16} /> : <IconSend size={18} />}
               </button>
             </form>

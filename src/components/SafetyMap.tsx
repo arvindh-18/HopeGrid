@@ -5,7 +5,8 @@ import L from 'leaflet';
 import { useEffect, useMemo, useRef } from 'react';
 import { MapContainer, Marker, TileLayer, useMap } from 'react-leaflet';
 import type { PublicIncident } from '../../shared/types';
-import { TYPE_ICON, TYPE_LABEL } from '../lib/labels';
+import { useI18n } from '../i18n';
+import { TYPE_ICON } from '../lib/labels';
 
 interface Props {
   incidents: PublicIncident[];
@@ -44,6 +45,7 @@ function Recenter({ lat, lng }: { lat: number; lng: number }) {
 
 export function SafetyMap({ incidents, center, user, selected, onSelect, onTileError }: Props) {
   const errors = useRef(0);
+  const i = useI18n();
   const reported = useRef(false);
   const tileEvents = useMemo(() => ({
     tileerror: () => {
@@ -63,13 +65,13 @@ export function SafetyMap({ incidents, center, user, selected, onSelect, onTileE
         eventHandlers={tileEvents}
       />
       <Recenter lat={center.lat} lng={center.lng} />
-      {user && <Marker position={[user.lat, user.lng]} icon={userIcon} title="You are here" keyboard={false} />}
+      {user && <Marker position={[user.lat, user.lng]} icon={userIcon} title={i.t('map.youAreHere')} keyboard={false} />}
       {incidents.map((p) => (
         <Marker
           key={p.code}
           position={[p.lat, p.lng]}
           icon={pinIcon(p, selected === p.code)}
-          title={`${TYPE_LABEL[p.type]}${p.area ? `, ${p.area}` : ''}`}
+          title={`${i.type(p.type)}${p.area ? `, ${p.area}` : ''}`}
           eventHandlers={{ click: () => onSelect(p.code) }}
         />
       ))}

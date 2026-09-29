@@ -1,7 +1,7 @@
 // server/transcribe.ts — voice note → text (rules.md BR-12). whisper.cpp runs inside the server through
 // @fugood/whisper.node (prebuilt, GPU when available) and ffmpeg comes from @ffmpeg-installer — nothing to install
-// besides `npm install`. The ggml-small model (multilingual: Tamil, English, mixed) lives in models/ and is
-// downloaded only by `npm run setup-ai`.
+// besides `npm install`. The ggml-small model (multilingual: Tamil, Hindi and ~11 more Indian languages, English,
+// mixed) lives in models/ and is downloaded only by `npm run setup-ai`.
 import ffmpeg from '@ffmpeg-installer/ffmpeg';
 import { initWhisper, type WhisperContext } from '@fugood/whisper.node';
 import { execFile } from 'node:child_process';
@@ -68,8 +68,23 @@ function exclusive<T>(fn: () => Promise<T>): Promise<T> {
   return next;
 }
 
-/** Download audio, convert to 16 kHz mono PCM, transcribe with language auto-detect. Throws on failure. */
-export async function transcribe(storagePath: string): Promise<string> {
+export interface Transcript {
+  /** What was said, in the language it was said in. */
+  text: string;
+  /** Whisper language code, e.g. 'ta', 'hi', 'en'. Null when unknown. */
+  language: string | null;
+  /** English translation for non-English speech (Whisper's translate task); null for English or if it failed. */
+  english: string | null;
+}
+
+const clean = (s: string) => s.replace(/\s+/g, ' ').trim();
+
+/**
+ * Download audio, convert to 16 kHz mono PCM, transcribe with language auto-detect. Non-English speech is also
+ * translated to English (a second Whisper pass) so the AI, which is strongest in English, can structure it.
+ * Throws when nothing could be transcribed; a failed translation only leaves `english` null.
+ */
+export async function transcribe(storagePath: string): Promise<Transcript> {
   const deadline = Date.now() + WHISPER_TIMEOUT_MS;
   const remaining = () => Math.max(1, deadline - Date.now());
   const input = resolve(TMP_DIR, `${randomUUID()}.${storagePath.split('.').pop() ?? 'webm'}`);
@@ -84,15 +99,27 @@ export async function transcribe(storagePath: string): Promise<string> {
     );
     const pcm = stdout.buffer.slice(stdout.byteOffset, stdout.byteOffset + stdout.length) as ArrayBuffer;
     const context = await withTimeout(loadWhisper(), remaining(), 'Loading the speech model');
-    const result = await exclusive(async () => {
-      const job = context.transcribeData(pcm, { language: 'auto', temperature: 0 });
-      const timer = setTimeout(() => void job.stop(), remaining());
-      try { return await job.promise; } finally { clearTimeout(timer); }
+    return await exclusive(async () => {
+      const pass = async (options: { language: string; translate: boolean }) => {
+        const job = context.transcribeData(pcm.slice(0), { ...options, temperature: 0 });
+        const timer = setTimeout(() => void job.stop(), remaining());
+        try { return await job.promise; } finally { clearTimeout(timer); }
+      };
+      const heard = await pass({ language: 'auto', translate: false });
+      if (heard.isAborted) throw new Error('Transcription timed out');
+      const text = clean(heard.result);
+      if (!text) throw new Error('No speech recognised');
+      const language = heard.language || null;
+      if (!language || language === 'en') return { text, language, english: null };
+      try {
+        const translated = await pass({ language, translate: true });
+        const english = clean(translated.result);
+        return { text, language, english: !translated.isAborted && english && english !== text ? english : null };
+      } catch (e) {
+        console.warn(`Translation to English failed: ${e instanceof Error ? e.message : e}`);
+        return { text, language, english: null };
+      }
     });
-    if (result.isAborted) throw new Error('Transcription timed out');
-    const text = result.result.replace(/\s+/g, ' ').trim();
-    if (!text) throw new Error('No speech recognised');
-    return text;
   } finally {
     await rm(input, { force: true });
   }

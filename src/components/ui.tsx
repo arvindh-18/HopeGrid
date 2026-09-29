@@ -1,6 +1,7 @@
 // src/components/ui.tsx — reusable UI primitives (buttons, fields, states, toast).
 // Presentational only: no data access (AR-12).
 import { createContext, useCallback, useContext, useId, useState, type ButtonHTMLAttributes, type ReactNode } from 'react';
+import { useI18n } from '../i18n';
 import { IconAlert, IconCheck, IconClose, IconRefresh } from './Icons';
 
 // ---------- Button ----------
@@ -25,11 +26,12 @@ export function Button({ variant = 'primary', size = 'md', block, busy, classNam
 export function Field({
   label, hint, error, optional, children, htmlFor,
 }: { label: string; hint?: ReactNode; error?: string | null; optional?: boolean; children: ReactNode; htmlFor?: string }) {
+  const { t } = useI18n();
   return (
     <div className="flex flex-col gap-1.5">
       <label htmlFor={htmlFor} className="text-[15px] text-ink">
         {label}
-        {optional && <span className="text-muted"> (optional)</span>}
+        {optional && <span className="text-muted"> ({t('common.optional')})</span>}
       </label>
       {children}
       {hint && !error && <p className="t-caption">{hint}</p>}
@@ -88,11 +90,12 @@ export function EmptyState({ title, body, action }: { title: string; body?: Reac
 }
 
 export function ErrorState({ message, onRetry }: { message: string; onRetry?: () => void }) {
+  const { t, server } = useI18n();
   return (
     <div className="flex flex-col items-start gap-3 rounded-[16px] bg-white px-6 py-6" role="alert">
-      <div className="flex items-center gap-2 text-danger"><IconAlert /> <span className="font-medium">Could not load this</span></div>
-      <p className="t-body-sm text-muted">{message}</p>
-      {onRetry && <Button variant="outline" size="sm" onClick={onRetry}><IconRefresh size={16} /> Try again</Button>}
+      <div className="flex items-center gap-2 text-danger"><IconAlert /> <span className="font-medium">{t('common.couldNotLoad')}</span></div>
+      <p className="t-body-sm text-muted">{server(message)}</p>
+      {onRetry && <Button variant="outline" size="sm" onClick={onRetry}><IconRefresh size={16} /> {t('common.tryAgain')}</Button>}
     </div>
   );
 }
@@ -115,13 +118,14 @@ export function Notice({ tone = 'info', children, action }: { tone?: NoticeTone;
 
 /** Small "Updated 5 s ago / showing older data" line under polled content. */
 export function FreshnessLine({ lastUpdated, stale, onRefresh }: { lastUpdated: Date | null; stale: boolean; onRefresh?: () => void }) {
+  const { t } = useI18n();
   return (
     <p className={`t-caption flex items-center gap-2 ${stale ? 'text-[#924400]' : ''}`}>
-      {stale ? 'Could not refresh — showing information from ' : 'Updated '}
+      {stale ? t('common.stale') : t('common.updated')}{' '}
       {lastUpdated ? lastUpdated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—'}
       {onRefresh && (
         <button type="button" onClick={onRefresh} className="inline-flex items-center gap-1 text-ink underline-offset-2 hover:underline">
-          <IconRefresh size={14} /> Refresh
+          <IconRefresh size={14} /> {t('common.refresh')}
         </button>
       )}
     </p>

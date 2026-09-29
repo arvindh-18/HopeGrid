@@ -1,8 +1,10 @@
 // src/components/Layout.tsx — header, role navigation, offline banner, emergency banner, demo menu.
+// Public pages follow the chosen language (F25); admin and volunteer pages are always English.
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { EMERGENCY_NUMBER, api } from '../data';
 import { homeFor, useAuth } from '../hooks/useAuth';
+import { EnglishOnly, LanguagePicker, useI18n, type Key } from '../i18n';
 import { isForcedOffline, setForcedOffline, useOnline } from '../offline/useOnline';
 import { IconClose, IconFlask, IconMenu, IconPhone, IconWifiOff } from './Icons';
 import { Toggle, useToast } from './ui';
@@ -18,12 +20,12 @@ interface LayoutProps {
   children: ReactNode;
 }
 
-const NAV: Record<Variant, { to: string; label: string; end?: boolean }[]> = {
-  public: [
-    { to: '/report', label: 'Report' },
-    { to: '/track', label: 'Track a report' },
-    { to: '/map', label: 'Safety map' },
-  ],
+const PUBLIC_NAV: { to: string; label: Key }[] = [
+  { to: '/report', label: 'nav.report' },
+  { to: '/track', label: 'nav.track' },
+  { to: '/map', label: 'nav.map' },
+];
+const NAV: Record<Exclude<Variant, 'public'>, { to: string; label: string; end?: boolean }[]> = {
   admin: [
     { to: '/admin', label: 'Incidents', end: true },
     { to: '/admin/resources', label: 'Resources' },
@@ -48,15 +50,21 @@ function Logo() {
   );
 }
 
-export function Layout({ variant = 'public', emergency, width = 'narrow', children }: LayoutProps) {
+export function Layout(props: LayoutProps) {
+  return props.variant && props.variant !== 'public' ? <EnglishOnly><LayoutInner {...props} /></EnglishOnly> : <LayoutInner {...props} />;
+}
+
+function LayoutInner({ variant = 'public', emergency, width = 'narrow', children }: LayoutProps) {
   const online = useOnline();
+  const { t, rich } = useI18n();
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
   useEffect(() => setMenuOpen(false), [location.pathname]);
 
-  const links = NAV[variant];
+  const links: { to: string; label: string; end?: boolean }[] =
+    variant === 'public' ? PUBLIC_NAV.map((l) => ({ ...l, label: t(l.label) })) : NAV[variant];
   const linkCls = ({ isActive }: { isActive: boolean }) =>
     `rounded-full px-3.5 py-2 text-[15px] no-underline transition-colors ${isActive ? 'bg-white/12 text-white' : 'text-white/75 hover:text-white'}`;
 
@@ -68,7 +76,10 @@ export function Layout({ variant = 'public', emergency, width = 'narrow', childr
           <nav className="ml-4 hidden items-center gap-1 md:flex" aria-label="Main">
             {links.map((l) => <NavLink key={l.to} to={l.to} end={l.end} className={linkCls}>{l.label}</NavLink>)}
           </nav>
-          <div className="ml-auto hidden items-center gap-3 md:flex">
+          {variant === 'public' && (
+            <LanguagePicker className="ml-auto rounded-full border border-white/25 bg-dark px-3 py-1.5 text-[14px] text-white" />
+          )}
+          <div className={`${variant === 'public' ? 'ml-3' : 'ml-auto'} hidden items-center gap-3 md:flex`}>
             {user ? (
               <>
                 {variant === 'public' && <Link to={homeFor(user)} className="text-[14px] text-white/75 no-underline hover:text-white">My workspace</Link>}
@@ -76,10 +87,10 @@ export function Layout({ variant = 'public', emergency, width = 'narrow', childr
                 <button type="button" onClick={() => { logout(); navigate('/'); }} className="rounded-full bg-white px-4 py-2 text-[14px] font-medium text-ink">Log out</button>
               </>
             ) : (
-              variant === 'public' && <Link to="/login" className="rounded-full bg-white/10 px-4 py-2 text-[14px] text-white no-underline hover:bg-white/20">Staff login</Link>
+              variant === 'public' && <Link to="/login" className="rounded-full bg-white/10 px-4 py-2 text-[14px] text-white no-underline hover:bg-white/20">{t('nav.staffLogin')}</Link>
             )}
           </div>
-          <button type="button" className="ml-auto grid h-10 w-10 place-items-center rounded-full hover:bg-white/10 md:hidden" aria-expanded={menuOpen} aria-label="Menu" onClick={() => setMenuOpen((v) => !v)}>
+          <button type="button" className={`${variant === 'public' ? 'ml-1' : 'ml-auto'} grid h-10 w-10 place-items-center rounded-full hover:bg-white/10 md:hidden`} aria-expanded={menuOpen} aria-label={t('nav.menu')} onClick={() => setMenuOpen((v) => !v)}>
             {menuOpen ? <IconClose /> : <IconMenu />}
           </button>
         </div>
@@ -89,14 +100,14 @@ export function Layout({ variant = 'public', emergency, width = 'narrow', childr
             {user ? (
               <button type="button" onClick={() => { logout(); navigate('/'); }} className="mt-2 self-start rounded-full bg-white px-4 py-2 text-[14px] font-medium text-ink">Log out {user.name}</button>
             ) : (
-              <NavLink to="/login" className={linkCls}>Staff login</NavLink>
+              <NavLink to="/login" className={linkCls}>{t('nav.staffLogin')}</NavLink>
             )}
           </nav>
         )}
         {!online && (
           <div className="flex items-center justify-center gap-2 bg-[#fbf2cf] px-4 py-2 text-[14px] text-[#5c4600]" role="status">
             <IconWifiOff size={18} />
-            <span>You're offline.{variant === 'public' ? ' You can still report — it will send automatically.' : ' Showing the last information we had.'}</span>
+            <span>{variant === 'public' ? t('offline.public') : "You're offline. Showing the last information we had."}</span>
           </div>
         )}
       </header>
@@ -105,7 +116,7 @@ export function Layout({ variant = 'public', emergency, width = 'narrow', childr
         <div className="bg-white">
           <div className="mx-auto flex max-w-5xl items-center gap-3 px-4 py-2.5 text-[14px] sm:px-6">
             <IconPhone size={18} className="text-danger" />
-            <span>In danger right now? If you can call, call <a href={`tel:${EMERGENCY_NUMBER}`} className="font-medium text-danger">{EMERGENCY_NUMBER}</a>.</span>
+            <span>{rich('emergency.call', { n: <a href={`tel:${EMERGENCY_NUMBER}`} className="font-medium text-danger">{EMERGENCY_NUMBER}</a> })}</span>
           </div>
         </div>
       )}

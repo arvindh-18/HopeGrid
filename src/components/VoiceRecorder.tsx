@@ -2,6 +2,7 @@
 // Real browser MediaRecorder; works offline. Returns base64 + mime + seconds.
 import { useEffect, useRef, useState } from 'react';
 import { MAX_AUDIO_SECONDS } from '../../shared/constants';
+import { useI18n } from '../i18n';
 import { blobToBase64 } from '../lib/media';
 import { IconMic, IconPause, IconPlay, IconStop, IconTrash } from './Icons';
 
@@ -19,6 +20,7 @@ interface Props {
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
 export function VoiceRecorder({ value, onChange, onRecordingChange, compact, disabled }: Props) {
+  const { t } = useI18n();
   const [recording, setRecording] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -37,7 +39,7 @@ export function VoiceRecorder({ value, onChange, onRecordingChange, compact, dis
   async function start() {
     setError(null);
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
-      setError("Voice recording isn't supported here. You can use your keyboard's mic button instead.");
+      setError(t('voice.unsupported'));
       return;
     }
     try {
@@ -64,7 +66,7 @@ export function VoiceRecorder({ value, onChange, onRecordingChange, compact, dis
         if (s >= MAX_AUDIO_SECONDS) stop();
       }, 250);
     } catch {
-      setError("Microphone blocked — you can use your keyboard's mic button instead.");
+      setError(t('voice.blocked'));
     }
   }
 
@@ -97,14 +99,14 @@ export function VoiceRecorder({ value, onChange, onRecordingChange, compact, dis
   if (value && !recording) {
     return (
       <div className={`flex items-center gap-3 rounded-full bg-[#e3eee3] ${compact ? 'px-2 py-1' : 'px-3 py-2'}`}>
-        <button type="button" onClick={togglePlay} aria-label={playing ? 'Pause voice note' : 'Play voice note'} className="grid h-9 w-9 place-items-center rounded-full bg-white text-ink">
+        <button type="button" onClick={togglePlay} aria-label={playing ? t('voice.pause') : t('voice.play')} className="grid h-9 w-9 place-items-center rounded-full bg-white text-ink">
           {playing ? <IconPause size={16} /> : <IconPlay size={16} />}
         </button>
-        <span className="flex-1 text-[14px] text-success">Voice note saved <span className="tabular-nums">{fmt(value.seconds)}</span></span>
+        <span className="flex-1 text-[14px] text-success">{t('voice.saved')} <span className="tabular-nums">{fmt(value.seconds)}</span></span>
         {!compact && (
-          <button type="button" onClick={start} className="text-[13px] text-ink underline-offset-2 hover:underline">Record again</button>
+          <button type="button" onClick={start} className="text-[13px] text-ink underline-offset-2 hover:underline">{t('voice.again')}</button>
         )}
-        <button type="button" onClick={remove} aria-label="Delete voice note" className="grid h-9 w-9 place-items-center rounded-full text-muted hover:bg-white hover:text-danger">
+        <button type="button" onClick={remove} aria-label={t('voice.delete')} className="grid h-9 w-9 place-items-center rounded-full text-muted hover:bg-white hover:text-danger">
           <IconTrash size={16} />
         </button>
       </div>
@@ -116,7 +118,7 @@ export function VoiceRecorder({ value, onChange, onRecordingChange, compact, dis
       <div className="flex flex-col">
         <button
           type="button" disabled={disabled} onClick={recording ? stop : start}
-          aria-label={recording ? 'Stop recording' : 'Record a voice message'}
+          aria-label={recording ? t('voice.stop') : t('voice.record')}
           className={`grid h-11 w-11 place-items-center rounded-full ${recording ? 'bg-danger text-white' : 'bg-canvas text-ink hover:bg-strong'} disabled:opacity-40`}
           style={recording ? { animation: 'pulse-ring 1.4s infinite' } : undefined}
         >
@@ -138,11 +140,11 @@ export function VoiceRecorder({ value, onChange, onRecordingChange, compact, dis
       >
         {recording ? (
           <>
-            <IconStop size={20} /> Tap to stop <span className="tabular-nums opacity-80">{fmt(elapsed)} / {fmt(MAX_AUDIO_SECONDS)}</span>
+            <IconStop size={20} /> {t('voice.tapStop')} <span className="tabular-nums opacity-80">{fmt(elapsed)} / {fmt(MAX_AUDIO_SECONDS)}</span>
           </>
         ) : (
           <>
-            <IconMic size={20} /> Tap to speak
+            <IconMic size={20} /> {t('voice.tapSpeak')}
           </>
         )}
       </button>

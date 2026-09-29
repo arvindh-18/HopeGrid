@@ -1,6 +1,6 @@
 # features.md — Hyperlocal HopeGrid Platform (Hackathon MVP v3)
 
-> **Purpose of this file:** WHAT to build: every feature (`F01`–`F24`), every screen (`S01`–`S11`), acceptance checks, and the demo scenario that proves the product works.
+> **Purpose of this file:** WHAT to build: every feature (`F01`–`F25`), every screen (`S01`–`S11`), acceptance checks, and the demo scenario that proves the product works.
 > **Structure, files, database and API:** see `architecture.md`. **Behaviour rules (`BR-*`) and agent rules (`AR-*`):** see `rules.md`.
 > A feature is done only when every acceptance check passes against the real backend.
 
@@ -34,8 +34,9 @@
 | F22 | Nearby hazard banner | SHOULD | Community | pages/PublicMap.tsx | F19 |
 | F23 | Demo tools | MUST | Team | Layout.tsx dev buttons, `/api/dev/reset` | — |
 | F24 | Live dictation while speaking (online only) | COULD | Victim | hooks/useLiveDictation.ts | F01 |
+| F25 | Victim screens in Tamil and Hindi | SHOULD | Victim | src/i18n/ | F01, F02, F06, F19 |
 
-**Out of scope (do not build):** victim accounts, volunteer self-registration, video upload, push notifications, real SMS, real calls or number masking, real emergency-service integration, offline admin/volunteer actions, multiple volunteers on one incident, undo merge, analytics, translations of the UI.
+**Out of scope (do not build):** victim accounts, volunteer self-registration, video upload, push notifications, real SMS, real calls or number masking, real emergency-service integration, offline admin/volunteer actions, multiple volunteers on one incident, undo merge, analytics, translating the staff (admin/volunteer) screens.
 
 ---
 
@@ -239,8 +240,16 @@
 **Acceptance:** [ ] "Reset demo data" restores the §12 seed via the server.
 
 ### F24 — Live dictation (optional)
-**Behaviour:** if `SpeechRecognition` exists and the device is online, show a small "✍️ Live text" toggle next to the mic; recognized words are appended to the description while recording (language `en-IN`, with a switch for `ta-IN`). The recorded voice note is still attached. Hide entirely when unsupported or offline.
+**Behaviour:** if `SpeechRecognition` exists and the device is online, show a small "✍️ Live text" toggle next to the mic; recognized words are appended to the description while recording (starts in the app's language: `en-IN`, `ta-IN` or `hi-IN`, with a switch). The recorded voice note is still attached. Hide entirely when unsupported or offline.
 **Acceptance:** [ ] Absence of this feature never breaks F03.
+
+### F25 — Regional languages (Tamil, Hindi)
+**Behaviour:** a language picker (English / தமிழ் / हिन्दी) in the header of every public page. The choice is saved on the device; the first visit follows the browser language. Home, Report, Report sent, Track, Safety map and the victim chat are translated, including server update lines, map advice and common error messages (translated on the phone from the known English text). Admin and volunteer screens always stay English. Voice notes in any Whisper-supported Indian language are transcribed and also translated to English for the AI (BR-12); typed Hindi is understood by the keyword fallback (BR-10).
+**Acceptance:**
+- [ ] Choosing தமிழ் or हिन्दी changes every victim screen with no English left, and survives a reload.
+- [ ] Admin pages stay English on a device set to Tamil.
+- [ ] A Hindi voice note produces a Hindi transcript plus an English line, and a structured incident.
+- [ ] Offline preview on "Report sent" works for a typed Hindi report.
 
 ---
 

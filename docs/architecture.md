@@ -148,6 +148,7 @@ hopegrid/
 │   │   ├── usePoll.ts
 │   │   ├── useAuth.tsx
 │   │   └── useLiveDictation.ts
+│   ├── i18n/                     (F25: en.ts, ta.ts, hi.ts, index.tsx)
 │   ├── lib/
 │   │   ├── codes.ts
 │   │   ├── media.ts
@@ -216,7 +217,7 @@ hopegrid/
 | mappers.ts | DB row ↔ API object conversion (snake_case ↔ camelCase). Only place this happens. |
 | storage.ts | `uploadBase64(path, base64, mime)`, `signedUrl(path)` (1 hour). |
 | ai.ts | `structureText(text): Promise<{extraction, source}>` — local LLM call (node-llama-cpp) (timeout 30 s, JSON schema of `Extraction`), validate/coerce (BR-11), on any failure use `keywordExtractor` and `source = KEYWORDS`. |
-| transcribe.ts | `transcribe(storagePath): Promise<string>` — download audio, ffmpeg → 16 kHz mono PCM, whisper.cpp in-process (language auto), timeout 60 s. Throws on failure. |
+| transcribe.ts | `transcribe(storagePath): Promise<{text, language, english}>` — download audio, ffmpeg → 16 kHz mono PCM, whisper.cpp in-process (language auto); non-English speech also translated to English (BR-12). Timeout 60 s. Throws on failure. |
 | pipeline.ts | `processReport(reportId)`, `recomputeIncident(incidentId)`, `processPendingReports()`. Implements §11.2. |
 | routes/victim.ts | `/api/reports`, `/api/track`, `/api/track/verify-phone`. |
 | routes/public.ts | `/api/public/incidents`. |
@@ -241,6 +242,7 @@ hopegrid/
 | hooks/usePoll.ts | `usePoll(fn, intervalMs)` → `{data, error, loading, refresh}`. |
 | hooks/useAuth.tsx | Auth context: `{user, token, login, logout}`; token in sessionStorage. |
 | hooks/useLiveDictation.ts | Optional (F24): browser SpeechRecognition wrapper. |
+| i18n/index.tsx | F25: `LanguageProvider`, `useI18n()` → `{t, rich, server, ago, type, need, advice…}`, `LanguagePicker`, `EnglishOnly` (staff screens). Keys in `en.ts`; `ta.ts`/`hi.ts` must cover every key (type-checked). |
 | lib/codes.ts | `newReportCode()`, `newPin()`, `newUuid()` using `crypto`. |
 | lib/media.ts | `compressImage(file) → base64 jpeg` (max 1280 px, quality 0.7); `blobToBase64`. |
 | lib/geo.ts | `getPosition()` with 10 s timeout; `distanceMeters()` (re-export of shared if needed). |

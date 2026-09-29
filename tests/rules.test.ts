@@ -35,6 +35,21 @@ describe('BR-10 keyword extractor', () => {
     expect(keywordExtractor('we are 4 in the building').people).toBe(4);
     expect(keywordExtractor('family of 900').people).toBeNull();
   });
+
+  it('understands Hindi (Devanagari) reports', () => {
+    const e = keywordExtractor('हमारे घर में बाढ़ का पानी घुस गया है। मेरी दादी चल नहीं सकती, हम चार लोग छत पर फंसे हैं। मंदिर के पास हैं, बचाओ!');
+    expect(e.type).toBe('FLOOD');
+    expect(e.people).toBe(4);
+    expect(e).toMatchObject({ vulnerable: true, mobilityIssue: true, trapped: true });
+    expect(e.needs).toEqual(expect.arrayContaining(['EVACUATION', 'RESCUE', 'PHYSICAL_HELP']));
+    expect(e.places).toContain('मंदिर');
+  });
+  it('understands Hinglish and matches Hindi words whole', () => {
+    expect(keywordExtractor('ghar mein aag lagi hai, 3 log andar hain').type).toBe('FIRE');
+    expect(keywordExtractor('ghar mein aag lagi hai, 3 log andar hain').people).toBe(3);
+    expect(keywordExtractor('आगे सड़क बंद है').type).toBe('ROAD_BLOCKED'); // आगे ("ahead") is not आग ("fire")
+    expect(keywordExtractor('बाढ़'.normalize('NFD')).type).toBe('FLOOD'); // nukta typed as a separate mark
+  });
 });
 
 describe('BR-20 confidence', () => {

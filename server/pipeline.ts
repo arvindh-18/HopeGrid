@@ -130,12 +130,16 @@ export async function processReport(reportId: string): Promise<void> {
       return;
     }
 
-    // 1. Transcribe (BR-12). Failure never stops processing.
+    // 1. Transcribe (BR-12). Failure never stops processing. Non-English speech also gets an English
+    // translation: staff see both, and the AI reads both — the original keeps what a poor translation loses.
     let transcript: string | null = null;
+    let forAi: string | null = null;
     let transcriptStatus = r.transcriptStatus;
     if (r.audioPath) {
       try {
-        transcript = await transcribe(r.audioPath);
+        const heard = await transcribe(r.audioPath);
+        transcript = heard.english ? `${heard.text}\n\nEnglish: ${heard.english}` : heard.text;
+        forAi = heard.english ? `${heard.text}\n(English machine translation, may be inaccurate: ${heard.english})` : heard.text;
         transcriptStatus = 'DONE';
       } catch (e) {
         console.warn(`Transcription failed for report ${r.id}: ${e instanceof Error ? e.message : e}`);
@@ -144,7 +148,7 @@ export async function processReport(reportId: string): Promise<void> {
     }
 
     // 2–3. Structure text + transcript (BR-10, BR-11).
-    const description = [r.text, transcript].filter((s) => s && s.trim()).join('\n');
+    const description = [r.text, forAi].filter((s) => s && s.trim()).join('\n');
     const { extraction, source } = await structureText(description);
 
     // 4. Victim input overrides AI (BR-13).
