@@ -1,26 +1,25 @@
-// src/data/realApi.ts — Phase C implementation of the Api interface (fetch to /api/*).
-// Every function is currently a stub that names its endpoint (architecture.md §8.2).
-// Phase C task: replace each stub with a fetch call that sends `Authorization: Bearer ${getToken()}`
-// on admin/volunteer routes, parses the error envelope into ApiError, and maps network failures to
-// ApiError('NETWORK'). Pages and components must not change when this file is filled in.
+// src/data/realApi.ts — implementation of the Api interface with fetch to /api/* (architecture.md §8).
+// Sends the staff bearer token, parses the error envelope (§8.1) into ApiError, and maps network failures
+// (and the Demo menu's "Simulate offline") to ApiError('NETWORK'). Pages never import this file (AR-12).
 import { ApiError } from '../../shared/types';
+import { isOnline } from '../offline/useOnline';
 import type { Api } from './index';
+import { getToken } from './index';
 
-function notConnected(endpoint: string): never {
-  throw new ApiError('SERVER_ERROR', `The server is not connected yet (${endpoint}).`);
-}
+const OFFLINE_MESSAGE = "You're offline or the server can't be reached.";
 
-/** JSON request to /api. Parses the error envelope (§8.1) into ApiError; fetch failures → NETWORK. */
+/** JSON request to /api. */
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  if (!isOnline()) throw new ApiError('NETWORK', OFFLINE_MESSAGE);
+  const headers: Record<string, string> = {};
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
   let res: Response;
   try {
-    res = await fetch(`/api${path}`, {
-      method,
-      headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
+    res = await fetch(`/api${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   } catch {
-    throw new ApiError('NETWORK', "You're offline or the server can't be reached.");
+    throw new ApiError('NETWORK', OFFLINE_MESSAGE);
   }
   const data = await res.json().catch(() => null);
   if (!res.ok) {
@@ -30,36 +29,47 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   return data as T;
 }
 
+const get = <T>(path: string) => request<T>('GET', path);
+const post = <T>(path: string, body: unknown = {}) => request<T>('POST', path, body);
+const patch = <T>(path: string, body: unknown) => request<T>('PATCH', path, body);
+const id = encodeURIComponent;
+
 export const realApi: Api = {
-  async submitReport(sub) { return request('POST', '/reports', sub); },
-  async track(_code, _pin) { return notConnected('POST /api/track'); },
-  async verifyPhone(_code, _pin, _phone, _otp) { return notConnected('POST /api/track/verify-phone'); },
-  async getVictimChat(_code, _pin) { return notConnected('POST /api/track/chat'); },
-  async sendVictimMessage(_code, _pin, _msg) { return notConnected('POST /api/track/chat/send'); },
-  async getPublicIncidents() { return notConnected('GET /api/public/incidents'); },
-  async login(_email, _password) { return notConnected('POST /api/auth/login'); },
-  async me() { return notConnected('GET /api/auth/me'); },
-  async listIncidents() { return notConnected('GET /api/admin/incidents'); },
-  async getIncident(_id) { return notConnected('GET /api/admin/incidents/:id'); },
-  async editIncident(_id, _patch) { return notConnected('PATCH /api/admin/incidents/:id'); },
-  async verifyIncident(_id, _publicArea) { return notConnected('POST /api/admin/incidents/:id/verify'); },
-  async rejectIncident(_id, _reason) { return notConnected('POST /api/admin/incidents/:id/reject'); },
-  async overridePriority(_id, _level, _reason) { return notConnected('POST /api/admin/incidents/:id/override'); },
-  async escalateIncident(_id, _note) { return notConnected('POST /api/admin/incidents/:id/escalate'); },
-  async resolveIncident(_id, _note) { return notConnected('POST /api/admin/incidents/:id/resolve'); },
-  async mergeIncident(_id, _intoId) { return notConnected('POST /api/admin/incidents/:id/merge'); },
-  async dismissDuplicate(_id) { return notConnected('POST /api/admin/incidents/:id/dismiss-duplicate'); },
-  async assignVolunteer(_id, _volunteerId) { return notConnected('POST /api/admin/incidents/:id/assign'); },
-  async cancelAssignment(_assignmentId) { return notConnected('POST /api/admin/assignments/:id/cancel'); },
-  async allocateResource(_id, _resourceId, _quantity) { return notConnected('POST /api/admin/incidents/:id/allocate'); },
-  async listResources() { return notConnected('GET /api/admin/resources'); },
-  async createResource(_r) { return notConnected('POST /api/admin/resources'); },
-  async updateResource(_id, _patch) { return notConnected('PATCH /api/admin/resources/:id'); },
-  async getMyProfile() { return notConnected('GET /api/volunteer/me'); },
-  async updateMyProfile(_patch) { return notConnected('PATCH /api/volunteer/me'); },
-  async listMyAssignments() { return notConnected('GET /api/volunteer/assignments'); },
-  async updateAssignmentStatus(_id, _status, _reason) { return notConnected('POST /api/volunteer/assignments/:id/status'); },
-  async getAssignmentChat(_id) { return notConnected('GET /api/volunteer/assignments/:id/chat'); },
-  async sendVolunteerMessage(_id, _reportId, _msg) { return notConnected('POST /api/volunteer/assignments/:id/chat'); },
-  async resetDemo() { return notConnected('POST /api/dev/reset'); },
+  // Victim
+  submitReport: (sub) => post('/reports', sub),
+  track: (code, pin) => post('/track', { code, pin }),
+  verifyPhone: (code, pin, phone, otp) => post('/track/verify-phone', { code, pin, phone, otp }),
+  getVictimChat: (code, pin) => post('/track/chat', { code, pin }),
+  sendVictimMessage: (code, pin, msg) => post('/track/chat/send', { code, pin, ...msg }),
+  // Public
+  getPublicIncidents: () => get('/public/incidents'),
+  // Auth
+  login: (email, password) => post('/auth/login', { email, password }),
+  me: () => get('/auth/me'),
+  // Admin
+  listIncidents: () => get('/admin/incidents'),
+  getIncident: (incidentId) => get(`/admin/incidents/${id(incidentId)}`),
+  editIncident: (incidentId, p) => patch(`/admin/incidents/${id(incidentId)}`, p),
+  verifyIncident: (incidentId, publicArea) => post(`/admin/incidents/${id(incidentId)}/verify`, { publicArea }),
+  rejectIncident: (incidentId, reason) => post(`/admin/incidents/${id(incidentId)}/reject`, { reason }),
+  overridePriority: (incidentId, level, reason) => post(`/admin/incidents/${id(incidentId)}/override`, { level, reason }),
+  escalateIncident: (incidentId, note) => post(`/admin/incidents/${id(incidentId)}/escalate`, { note }),
+  resolveIncident: (incidentId, note) => post(`/admin/incidents/${id(incidentId)}/resolve`, { note }),
+  mergeIncident: (incidentId, intoId) => post(`/admin/incidents/${id(incidentId)}/merge`, { intoId }),
+  dismissDuplicate: (incidentId) => post(`/admin/incidents/${id(incidentId)}/dismiss-duplicate`),
+  assignVolunteer: (incidentId, volunteerId) => post(`/admin/incidents/${id(incidentId)}/assign`, { volunteerId }),
+  cancelAssignment: (assignmentId) => post(`/admin/assignments/${id(assignmentId)}/cancel`),
+  allocateResource: (incidentId, resourceId, quantity) => post(`/admin/incidents/${id(incidentId)}/allocate`, { resourceId, quantity }),
+  listResources: () => get('/admin/resources'),
+  createResource: (r) => post('/admin/resources', r),
+  updateResource: (resourceId, p) => patch(`/admin/resources/${id(resourceId)}`, p),
+  // Volunteer
+  getMyProfile: () => get('/volunteer/me'),
+  updateMyProfile: (p) => patch('/volunteer/me', p),
+  listMyAssignments: () => get('/volunteer/assignments'),
+  updateAssignmentStatus: (assignmentId, status, reason) => post(`/volunteer/assignments/${id(assignmentId)}/status`, { status, reason }),
+  getAssignmentChat: (assignmentId) => get(`/volunteer/assignments/${id(assignmentId)}/chat`),
+  sendVolunteerMessage: (assignmentId, reportId, msg) => post(`/volunteer/assignments/${id(assignmentId)}/chat`, { reportId, ...msg }),
+  // Dev
+  resetDemo: () => post('/dev/reset'),
 };

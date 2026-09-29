@@ -14,7 +14,7 @@
 | F02 | Offline outbox & sync | MUST | Victim | offline/outbox.ts, pages/ReportSent.tsx | F01 |
 | F03 | Voice note on report | MUST | Victim | components/VoiceRecorder.tsx | F01 |
 | F04 | Report tracking (code + PIN) | MUST | Victim | pages/Track.tsx, routes/victim.ts, shared/trackingStatus.ts | F06 |
-| F05 | AI structuring (Whisper + Ollama + keyword fallback) | MUST | System | server/ai.ts, server/transcribe.ts, server/pipeline.ts, shared/keywordExtractor.ts | F01, F03 |
+| F05 | AI structuring (Whisper + local LLM + keyword fallback) | MUST | System | server/ai.ts, server/transcribe.ts, server/pipeline.ts, shared/keywordExtractor.ts | F01, F03 |
 | F06 | Incident creation & lifecycle | MUST | System/Admin | server/pipeline.ts, routes/admin.ts | F05 |
 | F07 | Duplicate detection & merge | MUST | System/Admin | shared/linking.ts, routes/admin.ts | F06 |
 | F08 | Related incidents (cascade) | MUST | System | shared/linking.ts | F06 |
@@ -96,7 +96,7 @@
 - **Admin view:** each report shows the original text, transcript (if any), audio player, extraction, and source badge "AI" or "Keywords".
 **Acceptance:**
 - [ ] Demo sentence 1 ("Water has entered our house. My grandmother cannot walk and we are stuck on the second floor. The road outside is completely flooded.") → type FLOOD, vulnerable true, trapped true, danger true, needs include EVACUATION. Must pass with **both** AI and keywords.
-- [ ] Stopping Ollama → new reports still create incidents with source "Keywords".
+- [ ] AI model unavailable (e.g. removed from `models/`) → new reports still create incidents with source "Keywords".
 - [ ] Whisper failure → report still becomes an incident; admin sees "🎤 Voice note could not be transcribed — listen".
 
 ### F06 — Incident creation & lifecycle
@@ -286,4 +286,4 @@ Setup: `/api/dev/reset` (or "Reset demo data"). Phone A = victim 1, Phone B = vi
 | 10 | Ravi → "I've arrived" → "Done" | Dashboard tag "Ready to resolve"; victim: "Help has arrived" |
 | 11 | Admin → Allocate 20 drinking water → Resolve | Map marker turns green "Resolved"; Phone A and B Track show Resolved; chat closed |
 
-Extra checks: stop Ollama and repeat step 4 → incident still created with "Keywords"; block map tiles → list view.
+Extra checks: make the AI model unavailable and repeat step 4 → incident still created with "Keywords"; block map tiles → list view.

@@ -7,6 +7,10 @@ export const PIN_LENGTH = 4;
 
 export const EMERGENCY_NUMBER = '112';
 export const DEMO_OTP = '123456';
+// Seeded staff accounts (architecture.md §12). Login quick-fill buttons show only in DEV builds (F11).
+export const DEMO_PASSWORD = 'Demo@123';
+export const DEMO_ADMIN_EMAIL = 'admin@demo.app';
+export const DEMO_VOLUNTEER_EMAIL = 'ravi@demo.app';
 export const DEMO_CENTER = { lat: 13.0405, lng: 80.2337 };
 
 // BR-03 submission validation
