@@ -1,0 +1,758 @@
+# architecture.md — Hyperlocal HopeGrid Platform (Hackathon MVP v3)
+
+> **Purpose of this file:** the single source of truth for HOW the system is built: stack, folders, database, API, data flow, environment, setup and build plan.
+> **Companion files:** `features.md` (WHAT to build, feature IDs `F*`, screen IDs `S*`) and `rules.md` (HOW things behave `BR-*`, and how agents work `AR-*`).
+> **If any two files seem to disagree: stop and ask the lead. Do not guess.**
+
+---
+
+## 1. Product in one paragraph
+
+Victims report emergencies from a phone (text, voice, photo, GPS) without logging in, even while offline. The server turns each report into a structured incident using local AI (Whisper for speech, Ollama for understanding), detects duplicates and related incidents, and scores confidence (how reliable) and priority (how urgent) with visible reasons. An admin reviews, verifies, merges, assigns a volunteer, allocates resources, escalates (simulated) and resolves. The volunteer accepts and updates progress, and can chat privately with the victim without either side seeing phone numbers. The public sees a safe hazard map.
+
+**Principle:** AI understands and assists. Humans verify and decide. Volunteers respond. The community stays informed.
+
+---
+
+## 2. Roles
+
+| Role | Login | Where |
+|---|---|---|
+| Victim | No login. Uses report code + PIN. | Public pages |
+| Community | No login | Public map |
+| Admin | Supabase Auth (email + password), role `ADMIN` | `/admin/*` |
+| Volunteer | Supabase Auth (email + password), role `VOLUNTEER` | `/volunteer/*` |
+
+There is no self-registration. All staff accounts are created by the seed script.
+
+---
+
+## 3. System architecture
+
+```text
+┌──────────────────────────── React PWA (one app) ────────────────────────────┐
+│ Pages/components                                                             │
+│      │ (only through)                                                        │
+│ src/data/index.ts  ──►  mockApi.ts (VITE_USE_MOCK=true, UI phase)            │
+│                    └─►  realApi.ts (fetch /api/*)                            │
+│ src/offline/outbox.ts (IndexedDB) → sends queued reports when online         │
+└───────────────────────────────┬──────────────────────────────────────────────┘
+                                │ HTTPS (cloudflared/ngrok tunnel to laptop)
+┌───────────────────────────────▼──────────────── Express server (laptop) ─────┐
+│ routes → shared rules (/shared) → Supabase client (service role)             │
+│ pipeline.ts: transcribe (Whisper) → structure (Ollama | keywords) → incident │
+│              → duplicate check → scores                                      │
+│ Serves built frontend (dist/) in demo mode                                   │
+└───────┬───────────────────────┬──────────────────────────┬───────────────────┘
+        │                       │                          │
+   Supabase (cloud)        Ollama (local)            whisper.cpp + ffmpeg (local)
+   - Postgres tables       - qwen2.5:3b              - ggml-small model
+   - Storage bucket "media" (private)
+   - Auth (staff only)
+```
+
+### 3.1 Architecture decisions (final — do not change without lead approval)
+
+| # | Decision | Reason |
+|---|---|---|
+| D1 | One repo, one `package.json`. Folders: `src/` (frontend), `server/` (backend), `shared/` (plain TS imported by both). | Simplest setup; shared types and rules keep mock and real behaving identically. |
+| D2 | React + Vite + TypeScript + Tailwind + React Router. | Fast, familiar. |
+| D3 | `vite-plugin-pwa` for app-shell offline only. No custom service worker logic. | The app must open offline; reports are queued by app code, not by the service worker. |
+| D4 | `idb-keyval` for the offline outbox and device ID. | Can store large base64 media; localStorage is too small. |
+| D5 | Express server is the **only** component that talks to Supabase. The frontend never imports `@supabase/supabase-js`. | One boundary; secrets stay on server; mock/real swap stays clean. |
+| D6 | Supabase Postgres with RLS **enabled on every table and no policies**. Server uses the service-role key. | Secure by default with zero policy work. |
+| D7 | Supabase Storage bucket `media`, **private**. Server returns signed URLs (1 hour) only to allowed users. | Victim photos/voice never public. |
+| D8 | Supabase Auth for staff login, called by the server (`/api/auth/login`). Server verifies bearer token on each request. | Real auth with no custom password handling. |
+| D9 | Report processing runs inside the server process after responding (not awaited). On server start, all `PENDING` reports are processed. | No queue infrastructure; nothing lost on restart. |
+| D10 | Ollama (`qwen2.5:3b` default) with JSON-schema output, temperature 0. Fallback: keyword extractor in `shared/`. | "Local AI"; demo never stalls. |
+| D11 | whisper.cpp CLI + ffmpeg for speech-to-text, called with `child_process`. | Local, multilingual (Tamil + English), works on recorded audio. |
+| D12 | Polling (no websockets/realtime). Intervals in `shared/constants.ts`. | Simple and enough at demo scale. |
+| D13 | Leaflet + OpenStreetMap tiles; list view fallback. | Free, no API key. |
+| D14 | Media and all request bodies are JSON with base64 media (no multipart). | One code path for online and offline (outbox stores JSON). |
+| D15 | DB columns are `snake_case`; API JSON and TS are `camelCase`. Conversion only in `server/mappers.ts`. | No naming ambiguity. |
+| D16 | MVP: at most **one active assignment per incident** and per volunteer. | Unambiguous chat routing and reassignment. |
+
+---
+
+## 4. Tech stack and allowed libraries
+
+**Frontend:** react, react-dom, react-router-dom, vite, @vitejs/plugin-react, vite-plugin-pwa, tailwindcss, @tailwindcss/vite, leaflet, react-leaflet, idb-keyval.
+**Backend:** express, @supabase/supabase-js, tsx (run TS), dotenv.
+**Tooling:** typescript, concurrently, vitest.
+**External programs (laptop):** Ollama, whisper.cpp (`whisper-cli`), ffmpeg, cloudflared (or ngrok).
+
+No other library may be added without lead approval (see `rules.md` AR-06).
+
+---
+
+## 5. Folder and file structure
+
+Every file that should exist is listed. Do not create other files without approval.
+
+```text
+hopegrid/
+├── package.json
+├── tsconfig.json
+├── vite.config.ts
+├── index.html
+├── .env.example
+├── .gitignore
+├── README.md
+├── docs/
+│   ├── architecture.md
+│   ├── features.md
+│   └── rules.md
+├── supabase/
+│   └── schema.sql
+├── models/                       (gitignored; whisper model file lives here)
+├── shared/
+│   ├── types.ts
+│   ├── constants.ts
+│   ├── keywordExtractor.ts
+│   ├── scoring.ts
+│   ├── linking.ts
+│   ├── volunteerMatch.ts
+│   ├── publicView.ts
+│   └── trackingStatus.ts
+├── server/
+│   ├── index.ts
+│   ├── supabase.ts
+│   ├── auth.ts
+│   ├── mappers.ts
+│   ├── storage.ts
+│   ├── ai.ts
+│   ├── transcribe.ts
+│   ├── pipeline.ts
+│   ├── routes/
+│   │   ├── victim.ts
+│   │   ├── public.ts
+│   │   ├── authRoutes.ts
+│   │   ├── admin.ts
+│   │   ├── volunteer.ts
+│   │   ├── messages.ts
+│   │   └── dev.ts
+│   └── scripts/
+│       └── seed.ts
+├── src/
+│   ├── main.tsx
+│   ├── App.tsx
+│   ├── index.css
+│   ├── data/
+│   │   ├── index.ts
+│   │   ├── realApi.ts
+│   │   ├── mockApi.ts
+│   │   └── mockData.ts
+│   ├── offline/
+│   │   ├── outbox.ts
+│   │   ├── deviceId.ts
+│   │   └── useOnline.ts
+│   ├── hooks/
+│   │   ├── usePoll.ts
+│   │   ├── useAuth.tsx
+│   │   └── useLiveDictation.ts
+│   ├── lib/
+│   │   ├── codes.ts
+│   │   ├── media.ts
+│   │   ├── geo.ts
+│   │   └── labels.ts
+│   ├── components/
+│   │   ├── Layout.tsx
+│   │   ├── Badges.tsx
+│   │   ├── ReasonList.tsx
+│   │   ├── Modal.tsx
+│   │   ├── SafetyMap.tsx
+│   │   ├── VoiceRecorder.tsx
+│   │   └── ChatBox.tsx
+│   └── pages/
+│       ├── Home.tsx
+│       ├── Report.tsx
+│       ├── ReportSent.tsx
+│       ├── Track.tsx
+│       ├── PublicMap.tsx
+│       ├── Login.tsx
+│       ├── NotFound.tsx
+│       ├── admin/
+│       │   ├── Dashboard.tsx
+│       │   ├── IncidentPage.tsx
+│       │   └── Resources.tsx
+│       └── volunteer/
+│           ├── VolunteerHome.tsx
+│           └── AssignmentPage.tsx
+└── tests/
+    └── rules.test.ts
+```
+
+### 5.1 File responsibilities
+
+**Root**
+
+| File | Responsibility |
+|---|---|
+| package.json | Scripts: `dev` (vite + server via concurrently), `build` (vite build), `start` (server serving dist), `seed` (server/scripts/seed.ts), `test` (vitest). |
+| vite.config.ts | React, Tailwind, PWA plugin (manifest name "HopeGrid", app-shell precache), dev proxy `/api` → `http://localhost:3000`. |
+| .env.example | All variables in §9. |
+| .gitignore | node_modules, dist, .env, models/*, tmp/ |
+| README.md | Setup steps (§10), demo accounts, how to run demo. |
+| supabase/schema.sql | Creates all tables in §6, enables RLS on each, creates storage bucket `media` (private). Run once in Supabase SQL editor. |
+
+**shared/** (pure TypeScript; no imports from `src/` or `server/`; no network, no DB)
+
+| File | Responsibility | Rules |
+|---|---|---|
+| types.ts | All enums and API types (§7, §8). The only place types are defined. | — |
+| constants.ts | Thresholds, weights, polling intervals, limits, code alphabet, emergency number default. | All numbers used by rules live here. |
+| keywordExtractor.ts | Text → `Extraction` without AI (offline preview + server fallback). | BR-10 |
+| scoring.ts | `computeConfidence`, `computePriority`, `effectivePriority`, `computeEscalation`. | BR-20…BR-32 |
+| linking.ts | `findDuplicate`, `findRelated`, `mergeFields`. | BR-40…BR-52 |
+| volunteerMatch.ts | `rankVolunteers`. | BR-60…BR-63 |
+| publicView.ts | `isPublic`, `toPublicIncident`, `adviceFor`, `markerColor`. | BR-80…BR-84 |
+| trackingStatus.ts | `victimStep` (internal state → victim step). | BR-90 |
+
+**server/**
+
+| File | Responsibility |
+|---|---|
+| index.ts | Express app: JSON body limit 15 MB, mounts routes under `/api`, error handler (envelope §8.1), serves `dist/` + SPA fallback, on start runs `processPendingReports()`. Port from env. |
+| supabase.ts | Creates two clients: `db` (service role, for all data + storage) and `authClient` (anon key, for `signInWithPassword`). |
+| auth.ts | Middleware `requireRole(role)`: reads `Authorization: Bearer <token>`, `db.auth.getUser(token)`, loads `profiles` row, attaches `req.user = {id, name, role}`; 401/403 otherwise. |
+| mappers.ts | DB row ↔ API object conversion (snake_case ↔ camelCase). Only place this happens. |
+| storage.ts | `uploadBase64(path, base64, mime)`, `signedUrl(path)` (1 hour). |
+| ai.ts | `structureText(text): Promise<{extraction, source}>` — Ollama call (timeout 30 s, JSON schema of `Extraction`), validate/coerce (BR-11), on any failure use `keywordExtractor` and `source = KEYWORDS`. |
+| transcribe.ts | `transcribe(storagePath): Promise<string>` — download audio, ffmpeg → 16 kHz mono wav in `tmp/`, run whisper-cli (`-l auto`), return text; timeout 60 s; delete temp files. Throws on failure. |
+| pipeline.ts | `processReport(reportId)`, `recomputeIncident(incidentId)`, `processPendingReports()`. Implements §11.2. |
+| routes/victim.ts | `/api/reports`, `/api/track`, `/api/track/verify-phone`. |
+| routes/public.ts | `/api/public/incidents`. |
+| routes/authRoutes.ts | `/api/auth/login`, `/api/auth/me`. |
+| routes/admin.ts | All `/api/admin/*` routes. |
+| routes/volunteer.ts | `/api/volunteer/*` except chat. |
+| routes/messages.ts | Victim chat (`/api/track/chat*`) and volunteer chat (`/api/volunteer/assignments/:id/chat`). |
+| routes/dev.ts | `/api/dev/reset` — only mounted when `DEV_MODE=true`. |
+| scripts/seed.ts | Deletes all rows + storage objects, creates staff auth users if missing, inserts seed data (§12). Also used by `/api/dev/reset`. |
+
+**src/** (frontend)
+
+| File | Responsibility |
+|---|---|
+| main.tsx | Render app, register PWA, call `outbox.start()`. |
+| App.tsx | All routes (§5.2). Only the lead edits route definitions. |
+| data/index.ts | Exports `api: Api` = mockApi or realApi based on `VITE_USE_MOCK`. Defines the `Api` interface (§8.3). |
+| data/realApi.ts | Implements `Api` with fetch to `/api/*`, attaches bearer token from `useAuth` storage. |
+| data/mockApi.ts | Implements `Api` in memory using `mockData.ts` and the real `shared/` rules. Persists to localStorage key `mockdb`. Includes `resetDemo()`. |
+| data/mockData.ts | Seed fixtures identical in meaning to §12, including canned transcripts. |
+| offline/outbox.ts | Queue, send, retry reports (BR-02). `start()`, `enqueue()`, `list()`, `retryAll()`, `remove(id)`, `subscribe(fn)`. |
+| offline/deviceId.ts | `getDeviceId()` — UUID created on first use, stored in IndexedDB. |
+| offline/useOnline.ts | `navigator.onLine` + events. |
+| hooks/usePoll.ts | `usePoll(fn, intervalMs)` → `{data, error, loading, refresh}`. |
+| hooks/useAuth.tsx | Auth context: `{user, token, login, logout}`; token in sessionStorage. |
+| hooks/useLiveDictation.ts | Optional (F24): browser SpeechRecognition wrapper. |
+| lib/codes.ts | `newReportCode()`, `newPin()`, `newUuid()` using `crypto`. |
+| lib/media.ts | `compressImage(file) → base64 jpeg` (max 1280 px, quality 0.7); `blobToBase64`. |
+| lib/geo.ts | `getPosition()` with 10 s timeout; `distanceMeters()` (re-export of shared if needed). |
+| lib/labels.ts | Enum → display text, colors, icons. |
+| components/Layout.tsx | Header, nav per role, offline banner, emergency number banner on public pages. |
+| components/Badges.tsx | PriorityBadge, ConfidenceBadge, StatusBadge. |
+| components/ReasonList.tsx | Renders `Reason[]` ("+20 · 2 independent reports"). |
+| components/Modal.tsx | Generic modal. |
+| components/SafetyMap.tsx | Leaflet map with colored markers; `onTileError` → list mode. |
+| components/VoiceRecorder.tsx | Record (MediaRecorder), stop at 60 s, play, delete; returns `{base64, mime, seconds}`. |
+| components/ChatBox.tsx | Message list, text input, quick replies, voice message, share-location button; used by victim, volunteer, admin (read-only prop). |
+| pages/* | One screen each (see `features.md` §S). Pages hold no business logic and no fetch calls. |
+| tests/rules.test.ts | Unit tests for all `shared/` functions. |
+
+### 5.2 Routes (frontend)
+
+| Path | Page | Access |
+|---|---|---|
+| `/` | Home | Public |
+| `/report` | Report | Public |
+| `/report/sent/:id` | ReportSent (`:id` = report UUID in outbox) | Public |
+| `/track` | Track (optional query `?r=<reportId>` to auto-fill code/PIN from outbox) | Public |
+| `/map` | PublicMap | Public |
+| `/login` | Login | Public |
+| `/admin` | admin/Dashboard | ADMIN |
+| `/admin/incidents/:id` | admin/IncidentPage | ADMIN |
+| `/admin/resources` | admin/Resources | ADMIN |
+| `/volunteer` | volunteer/VolunteerHome | VOLUNTEER |
+| `/volunteer/assignments/:id` | volunteer/AssignmentPage | VOLUNTEER |
+| `*` | NotFound | — |
+
+Unauthenticated access to a protected route → redirect to `/login`. Wrong role → redirect to that user's home.
+
+---
+
+## 6. Database (Supabase Postgres)
+
+Conventions: `id uuid primary key default gen_random_uuid()` unless stated; `created_at timestamptz default now()`; text enums stored as `text` (values from `shared/types.ts`); arrays as `text[]`; reason lists as `jsonb`. RLS enabled on every table, **no policies**.
+
+### 6.1 `profiles` (staff; one row per Supabase auth user)
+
+| Column | Type | Null | Notes |
+|---|---|---|---|
+| id | uuid PK | no | = `auth.users.id` |
+| name | text | no | |
+| email | text | no | |
+| role | text | no | `ADMIN` \| `VOLUNTEER` |
+| phone | text | yes | never sent to victims |
+| skills | text[] | no | `Skill[]`, empty for admin |
+| equipment | text[] | no | `Equipment[]` |
+| vehicle | text | no | `Vehicle`, default `NONE` |
+| availability | text | no | `Availability`, default `AVAILABLE` |
+| lat, lng | double precision | yes | volunteer base location |
+| created_at | timestamptz | no | |
+
+### 6.2 `incidents`
+
+| Column | Type | Null | Notes |
+|---|---|---|---|
+| id | uuid PK | no | |
+| code | text unique | no | 5 chars from code alphabet (BR-01) |
+| type | text | no | `IncidentType` |
+| lat, lng | double precision | yes | |
+| location_text | text | yes | admin-visible |
+| public_area | text | yes | shown publicly only when verified (BR-81) |
+| people | int | yes | null = unknown |
+| vulnerable, trapped, medical, danger | boolean | no | default false |
+| needs | text[] | no | `Need[]` |
+| summary | text | yes | |
+| status | text | no | `IncidentStatus`, default `NEW` |
+| confidence | int | no | 0–99 |
+| confidence_reasons | jsonb | no | `Reason[]` |
+| priority_score | int | no | |
+| priority | text | no | computed `PriorityLevel` |
+| priority_reasons | jsonb | no | `Reason[]` |
+| priority_override | text | yes | `PriorityLevel` |
+| override_reason | text | yes | required when override set |
+| escalation_recommended | boolean | no | |
+| escalation_reasons | jsonb | no | `Reason[]` |
+| escalated_at | timestamptz | yes | |
+| verified_at | timestamptz | yes | set by verify |
+| on_site_at | timestamptz | yes | first volunteer ON_SITE |
+| resolved_at | timestamptz | yes | |
+| reject_reason | text | yes | |
+| possible_duplicate_of | uuid FK → incidents | yes | |
+| merged_into | uuid FK → incidents | yes | |
+| created_at, updated_at | timestamptz | no | |
+
+### 6.3 `reports`
+
+| Column | Type | Null | Notes |
+|---|---|---|---|
+| id | uuid PK | no | **generated on the phone** (idempotency key) |
+| code | text unique | no | 6 chars (victim tracking code) |
+| pin | text | no | 4 digits (plain text; MVP) |
+| device_id | text | no | |
+| incident_id | uuid FK → incidents | yes | null until processed |
+| text | text | no | may be empty string when voice-only |
+| transcript | text | yes | |
+| transcript_status | text | no | `NONE` \| `DONE` \| `FAILED` |
+| lat, lng | double precision | yes | |
+| location_text | text | yes | |
+| people | int | yes | victim-entered |
+| needs | text[] | no | victim-entered |
+| phone | text | yes | |
+| phone_verified | boolean | no | default false |
+| photo_path | text | yes | storage path |
+| audio_path | text | yes | storage path |
+| audio_seconds | int | yes | |
+| extraction | jsonb | yes | `Extraction` |
+| ai_source | text | yes | `AI` \| `KEYWORDS` |
+| processing_status | text | no | `PENDING` \| `DONE` \| `FAILED` |
+| created_at | timestamptz | no | time on the phone |
+| received_at | timestamptz | no | server time, default now() |
+
+### 6.4 `assignments`
+
+| Column | Type | Null | Notes |
+|---|---|---|---|
+| id | uuid PK | no | |
+| incident_id | uuid FK | no | |
+| volunteer_id | uuid FK → profiles | no | |
+| status | text | no | `AssignmentStatus` |
+| reason | text | yes | `UnableReason` or free text |
+| created_at, updated_at | timestamptz | no | |
+
+### 6.5 `messages` (private chat)
+
+| Column | Type | Null | Notes |
+|---|---|---|---|
+| id | uuid PK | no | |
+| incident_id | uuid FK | no | |
+| report_id | uuid FK → reports | no | identifies which victim thread |
+| assignment_id | uuid FK → assignments | no | identifies which volunteer |
+| sender | text | no | `VICTIM` \| `VOLUNTEER` |
+| text | text | yes | |
+| audio_path | text | yes | |
+| lat, lng | double precision | yes | set by "share my location" |
+| created_at | timestamptz | no | |
+
+### 6.6 `resources`, `allocations`, `incident_logs`
+
+`resources`: id, name text, category text (`ResourceCategory`), quantity int (available now, ≥ 0), unit text, location_text text, created_at.
+`allocations`: id, resource_id FK, incident_id FK, quantity int (> 0), created_at.
+`incident_logs`: id, incident_id FK, text text, public boolean (shown to victim on Track page), created_at.
+
+### 6.7 Storage
+
+Bucket `media` (private). Paths:
+- `reports/{reportId}/photo.jpg`
+- `reports/{reportId}/audio.{webm|mp4|ogg}`
+- `messages/{messageId}.{webm|mp4|ogg}`
+
+---
+
+## 7. Shared types (contract — defined in `shared/types.ts`)
+
+```text
+IncidentType     = FLOOD | CYCLONE | HEAVY_RAIN | FIRE | BUILDING_COLLAPSE | LANDSLIDE
+                 | ROAD_BLOCKED | POWER_OUTAGE | PEOPLE_TRAPPED | MEDICAL | OTHER
+SITUATION_TYPES  = [PEOPLE_TRAPPED, MEDICAL, OTHER]
+HAZARD_TYPES     = all other IncidentType values
+Need             = EVACUATION | RESCUE | MEDICAL | PHYSICAL_HELP | FOOD_WATER | SHELTER | OTHER
+IncidentStatus   = NEW | VERIFIED | IN_PROGRESS | RESOLVED | REJECTED | MERGED
+ACTIVE_STATUSES  = [NEW, VERIFIED, IN_PROGRESS]
+PriorityLevel    = LOW | MEDIUM | HIGH | CRITICAL
+ConfidenceBand   = LOW | MEDIUM | HIGH
+Role             = ADMIN | VOLUNTEER
+Skill            = FIRST_AID | MEDICAL_PRO | SWIMMING | BOAT_HANDLING | SEARCH_RESCUE
+                 | FIREFIGHTING | DRIVING | GENERAL
+Equipment        = MEDICAL_KIT | LIFE_JACKET | BOAT | ROPE | TORCH | FIRE_EXTINGUISHER
+Vehicle          = NONE | BIKE | MOTORCYCLE | CAR | TRUCK | BOAT
+Availability     = AVAILABLE | BUSY | OFFLINE
+AssignmentStatus = ASSIGNED | ACCEPTED | DECLINED | EN_ROUTE | ON_SITE | ASSISTING
+                 | DONE | UNABLE | CANCELLED
+ACTIVE_ASSIGNMENT = [ASSIGNED, ACCEPTED, EN_ROUTE, ON_SITE, ASSISTING]
+CHAT_OPEN_ASSIGNMENT = [ACCEPTED, EN_ROUTE, ON_SITE, ASSISTING]
+UnableReason     = NO_ACCESS | MISSING_EQUIPMENT | UNSAFE | PERSONAL | TOO_FAR | OTHER
+ResourceCategory = WATER | FOOD | MEDICINE | BLANKET | GENERATOR | VEHICLE | BOAT | SHELTER | OTHER
+VictimStep       = RECEIVED | REVIEWING | VERIFIED | HELP_ASSIGNED | ON_THE_WAY | ARRIVED
+                 | RESOLVED | CLOSED
+MarkerColor      = RED | ORANGE | YELLOW | GREEN
+PublicStatus     = ACTIVE | RESPONDING | RESOLVED
+
+Reason     = { label: string, points: number }        // points may be 0 for info lines
+Extraction = { type: IncidentType, people: number|null, vulnerable: boolean,
+               mobilityIssue: boolean, trapped: boolean, medical: boolean,
+               danger: boolean, needs: Need[], places: string[], summary: string }
+```
+
+---
+
+## 8. API contract
+
+All routes are prefixed `/api`. JSON in, JSON out. Media is base64 (no data-URL prefix) plus a mime string. Admin/volunteer routes require header `Authorization: Bearer <token>`.
+
+### 8.1 Errors
+
+Body: `{ "error": { "code": ErrorCode, "message": string } }`
+
+| code | HTTP | When |
+|---|---|---|
+| VALIDATION | 400 | Missing/invalid fields |
+| UNAUTHORIZED | 401 | No/invalid token, wrong code/PIN on victim routes |
+| FORBIDDEN | 403 | Wrong role or not your assignment |
+| NOT_FOUND | 404 | Unknown id |
+| CODE_TAKEN | 409 | Report code already used by a different report id |
+| INVALID_STATE | 409 | Action not allowed in current status (see rules.md state tables) |
+| CHAT_CLOSED | 409 | Chat not open (BR-72) |
+| INSUFFICIENT_QUANTITY | 409 | Allocation larger than available |
+| SERVER_ERROR | 500 | Anything else |
+
+### 8.2 Endpoints
+
+**Victim (no login)**
+
+| Method | Path | Request | Response |
+|---|---|---|---|
+| POST | /reports | `ReportSubmission` | 201 `{ok:true, code}`; 200 same body if `id` already exists; 409 CODE_TAKEN |
+| POST | /track | `{code, pin}` | `TrackView` |
+| POST | /track/verify-phone | `{code, pin, phone, otp}` | `{ok:true}`; 400 if otp ≠ `123456` |
+| POST | /track/chat | `{code, pin}` | `{open: boolean, messages: ChatMessage[]}` |
+| POST | /track/chat/send | `{code, pin, text?, audioBase64?, audioMime?, lat?, lng?}` | `ChatMessage`; 409 CHAT_CLOSED |
+
+```text
+ReportSubmission = { id: uuid, code: string, pin: string, deviceId: string,
+  text: string, lat: number|null, lng: number|null, locationText: string|null,
+  people: number|null, needs: Need[], phone: string|null,
+  photoBase64: string|null, audioBase64: string|null, audioMime: string|null,
+  audioSeconds: number|null, createdAt: ISOString }
+
+TrackView = { code, step: VictimStep, updatedAt, messages: {at, text}[],   // public logs
+  phoneVerified: boolean, chatOpen: boolean }
+```
+
+**Public**
+
+| GET | /public/incidents | — | `{generatedAt, incidents: PublicIncident[]}` |
+|---|---|---|---|
+
+```text
+PublicIncident = { code, type, color: MarkerColor, area: string|null,
+  lat: number, lng: number,            // rounded to 3 decimals
+  priority: PriorityLevel, confidenceBand: ConfidenceBand, verified: boolean,
+  reportCount: number, status: PublicStatus, advice: string, updatedAt }
+```
+
+**Auth**
+
+| Method | Path | Request | Response |
+|---|---|---|---|
+| POST | /auth/login | `{email, password}` | `{token, user: {id, name, role}}`; 401 |
+| GET | /auth/me | — | `{user}` |
+
+**Admin (role ADMIN)**
+
+| Method | Path | Request | Response |
+|---|---|---|---|
+| GET | /admin/incidents | — | `{counts: {CRITICAL, HIGH, MEDIUM, LOW}, incidents: IncidentListItem[]}` |
+| GET | /admin/incidents/:id | — | `IncidentDetail` |
+| PATCH | /admin/incidents/:id | partial `{type, people, vulnerable, trapped, medical, danger, needs, lat, lng, locationText, publicArea, summary}` | `IncidentDetail` |
+| POST | /admin/incidents/:id/verify | `{publicArea?: string}` | `IncidentDetail` |
+| POST | /admin/incidents/:id/reject | `{reason: string}` | `IncidentDetail` |
+| POST | /admin/incidents/:id/override | `{level: PriorityLevel\|null, reason?: string}` | `IncidentDetail` |
+| POST | /admin/incidents/:id/escalate | `{note?: string}` | `IncidentDetail` |
+| POST | /admin/incidents/:id/resolve | `{note?: string}` | `IncidentDetail` |
+| POST | /admin/incidents/:id/merge | `{intoId: uuid}` | `IncidentDetail` (of target) |
+| POST | /admin/incidents/:id/dismiss-duplicate | — | `IncidentDetail` |
+| POST | /admin/incidents/:id/assign | `{volunteerId}` | `IncidentDetail` |
+| POST | /admin/assignments/:id/cancel | — | `IncidentDetail` |
+| POST | /admin/incidents/:id/allocate | `{resourceId, quantity}` | `IncidentDetail` |
+| GET | /admin/resources | — | `Resource[]` |
+| POST | /admin/resources | `{name, category, quantity, unit, locationText}` | `Resource` |
+| PATCH | /admin/resources/:id | partial of the above | `Resource` |
+
+```text
+IncidentListItem = { id, code, type, status, priority: PriorityLevel (effective),
+  overridden: boolean, confidence, confidenceBand, people, locationText,
+  reportCount, hasVoice: boolean, possibleDuplicateCode: string|null,
+  needsReassign: boolean, readyToResolve: boolean,
+  escalationRecommended: boolean, escalated: boolean, createdAt, updatedAt }
+
+IncidentDetail = IncidentListItem & { lat, lng, publicArea, vulnerable, trapped,
+  medical, danger, needs, summary, confidenceReasons: Reason[],
+  priorityScore, computedPriority, priorityReasons: Reason[], overrideReason,
+  escalationReasons: Reason[], escalatedAt, verifiedAt, resolvedAt, rejectReason,
+  reports: AdminReport[],
+  possibleDuplicate: {id, code, type, summary, distanceM: number|null} | null,
+  related: {id, code, type, text}[],
+  suggestions: VolunteerSuggestion[],
+  assignments: {id, volunteerId, volunteerName, status, reason, updatedAt}[],
+  allocations: {id, resourceName, quantity, unit, createdAt}[],
+  logs: {at, text, public}[],
+  chats: ChatThread[] }                       // read-only for admin
+
+AdminReport = { id, label ("Report 1"…), text, transcript, transcriptStatus,
+  photoUrl|null, audioUrl|null, audioSeconds, people, needs, phone, phoneVerified,
+  extraction, aiSource, processingStatus, lat, lng, locationText, createdAt, receivedAt }
+
+VolunteerSuggestion = { volunteerId, name, score, distanceM|null,
+  reasons: string[], missing: string[] }
+
+ChatThread  = { reportId, label ("Reporter 1"…), messages: ChatMessage[] }
+ChatMessage = { id, sender: VICTIM|VOLUNTEER, text|null, audioUrl|null,
+  lat|null, lng|null, createdAt }
+
+Resource = { id, name, category, quantity, unit, locationText }
+```
+
+**Volunteer (role VOLUNTEER)**
+
+| Method | Path | Request | Response |
+|---|---|---|---|
+| GET | /volunteer/me | — | `VolunteerProfile` |
+| PATCH | /volunteer/me | partial `{availability, skills, equipment, vehicle, lat, lng}` | `VolunteerProfile` |
+| GET | /volunteer/assignments | — | `VolunteerAssignment[]` (active first, then last 5 finished) |
+| POST | /volunteer/assignments/:id/status | `{status, reason?}` | `VolunteerAssignment` |
+| GET | /volunteer/assignments/:id/chat | — | `{open, threads: ChatThread[]}` |
+| POST | /volunteer/assignments/:id/chat | `{reportId, text?, audioBase64?, audioMime?}` | `ChatMessage`; 409 CHAT_CLOSED |
+
+```text
+VolunteerProfile = { id, name, skills, equipment, vehicle, availability, lat, lng }
+VolunteerAssignment = { id, status, reason, updatedAt,
+  incident: { id, code, type, summary, people, vulnerable, trapped, medical, danger,
+              needs, lat, lng, locationText, priority },
+  reporters: { reportId, label }[] }        // NO phone numbers, NO names
+```
+
+**Dev (only when DEV_MODE=true)**
+
+| POST | /dev/reset | — | `{ok:true}` — runs seed (deletes everything, re-inserts demo data) |
+|---|---|---|---|
+
+### 8.3 Frontend `Api` interface (`src/data/index.ts`)
+
+Both `mockApi` and `realApi` implement exactly these functions with the types above:
+
+```text
+submitReport(sub)            track(code, pin)             verifyPhone(code, pin, phone, otp)
+getVictimChat(code, pin)     sendVictimMessage(code, pin, msg)
+getPublicIncidents()
+login(email, password)       me()
+listIncidents()              getIncident(id)              editIncident(id, patch)
+verifyIncident(id, publicArea?)  rejectIncident(id, reason)
+overridePriority(id, level, reason?)  escalateIncident(id, note?)  resolveIncident(id, note?)
+mergeIncident(id, intoId)    dismissDuplicate(id)
+assignVolunteer(id, volunteerId)  cancelAssignment(assignmentId)
+allocateResource(id, resourceId, qty)
+listResources()  createResource(r)  updateResource(id, patch)
+getMyProfile()  updateMyProfile(patch)  listMyAssignments()
+updateAssignmentStatus(id, status, reason?)
+getAssignmentChat(id)  sendVolunteerMessage(id, reportId, msg)
+resetDemo()
+```
+
+Errors are thrown as `ApiError {code, message}` in both implementations.
+
+---
+
+## 9. Environment variables
+
+| Variable | Where | Example | Meaning |
+|---|---|---|---|
+| PORT | server | 3000 | |
+| SUPABASE_URL | server | https://xxxx.supabase.co | |
+| SUPABASE_ANON_KEY | server | … | used only for login |
+| SUPABASE_SERVICE_ROLE_KEY | server | … | all data + storage; never sent to browser |
+| OLLAMA_URL | server | http://localhost:11434 | |
+| OLLAMA_MODEL | server | qwen2.5:3b | |
+| WHISPER_BIN | server | ./whisper.cpp/build/bin/whisper-cli | |
+| WHISPER_MODEL | server | ./models/ggml-small.bin | |
+| FFMPEG_BIN | server | ffmpeg | |
+| DEV_MODE | server | true | enables /api/dev/reset and demo OTP hint |
+| EMERGENCY_NUMBER | server | 112 | |
+| VITE_USE_MOCK | frontend | true | true = mockApi, false = realApi |
+| VITE_EMERGENCY_NUMBER | frontend | 112 | |
+
+In Supabase project settings set **JWT expiry = 86400 seconds** so staff tokens last the whole demo.
+
+---
+
+## 10. Setup (hour 0–2)
+
+1. Create Supabase project → run `supabase/schema.sql` in SQL editor → copy URL/keys into `.env`.
+2. `npm install` → `npm run seed` (creates staff users + demo data).
+3. Install Ollama → `ollama pull qwen2.5:3b` → test one extraction.
+4. Build whisper.cpp → download `ggml-small.bin` into `models/` → install ffmpeg → test one Tamil and one English recording.
+5. `npm run dev` (mock or real).
+6. Demo mode: `npm run build && npm start` → `cloudflared tunnel --url http://localhost:3000` → open the HTTPS URL on phones (HTTPS is required for GPS, microphone and PWA install).
+
+---
+
+## 11. Key data flows
+
+### 11.1 Report submission (phone)
+
+```text
+Report page → build ReportSubmission (id, code, pin generated on phone; deviceId)
+  → outbox.enqueue(item)  (ALWAYS, online or offline)
+  → navigate /report/sent/:id (show code + PIN + keyword preview)
+  → outbox tries sending (see rules.md BR-02)
+```
+
+### 11.2 Server pipeline (`server/pipeline.ts`)
+
+```text
+POST /reports:
+  validate (BR-03) → if id exists: return 200 {ok, code}
+  → if code exists with different id: 409 CODE_TAKEN
+  → upload photo/audio to storage → insert report (PENDING) → 201
+  → processReport(id)  (not awaited)
+
+processReport(id):
+  1. if audio: transcript = transcribe(audio_path) → DONE | FAILED (BR-12)
+  2. description = text + "\n" + transcript
+  3. {extraction, source} = ai.structureText(description)       (BR-10, BR-11)
+  4. apply victim form values over AI values (BR-13)
+  5. create incident from extraction (status NEW, code BR-01), set report.incident_id
+     log "Report received" (public) and "AI: <source>" (admin)
+  6. dup = findDuplicate(incident, active incidents)  → possible_duplicate_of (BR-40)
+  7. recomputeIncident(incident.id)
+  8. report.processing_status = DONE
+  on unexpected error: report.processing_status = FAILED, log to console
+
+recomputeIncident(id):
+  load incident + reports + assignments
+  confidence = computeConfidence(...)      (BR-20)
+  priority   = computePriority(...)        (BR-25)
+  escalation = computeEscalation(...)      (BR-30)
+  save scores + reasons, updated_at = now
+```
+
+`recomputeIncident` is called after: new report processed, merge, verify, admin edit, phone verified, assignment reaches ON_SITE.
+
+### 11.3 Assignment and chat
+
+```text
+Admin assign → assignment ASSIGNED → volunteer sees offer (poll)
+Volunteer ACCEPT → incident IN_PROGRESS, volunteer BUSY, chat opens
+Victim Track page (poll) → chat visible → messages via /track/chat/send
+Volunteer AssignmentPage → one thread per reporter → messages via /volunteer/.../chat
+DONE / UNABLE / CANCELLED / incident RESOLVED → chat closed (read-only history)
+```
+
+---
+
+## 12. Seed data (server/scripts/seed.ts and src/data/mockData.ts — same meaning)
+
+Demo centre point: lat 13.0405, lng 80.2337 ("Central Street").
+
+**Staff** (password for all: `Demo@123`)
+
+| Email | Name | Role | Skills | Equipment | Vehicle | Availability | Location |
+|---|---|---|---|---|---|---|---|
+| admin@demo.app | Coordinator | ADMIN | — | — | NONE | — | — |
+| ravi@demo.app | Ravi | VOLUNTEER | SWIMMING, FIRST_AID, SEARCH_RESCUE | LIFE_JACKET, MEDICAL_KIT, ROPE | MOTORCYCLE | AVAILABLE | ~1.2 km from centre |
+| priya@demo.app | Priya | VOLUNTEER | MEDICAL_PRO, FIRST_AID | MEDICAL_KIT | CAR | AVAILABLE | ~2.5 km |
+| arun@demo.app | Arun | VOLUNTEER | DRIVING, GENERAL | — | TRUCK | AVAILABLE | ~3 km |
+| meena@demo.app | Meena | VOLUNTEER | FIREFIGHTING | FIRE_EXTINGUISHER | MOTORCYCLE | BUSY | ~2 km |
+| karthik@demo.app | Karthik | VOLUNTEER | BOAT_HANDLING, SWIMMING | BOAT, LIFE_JACKET | BOAT | AVAILABLE | ~6 km |
+
+**Resources:** Drinking water 200 bottles (Community Center) · Food packets 100 · First aid kits 20 · Blankets 80 · Generator 2 units · Rescue boat 1 · Shelter space 150 people.
+
+**Background incidents (each with 1 report):**
+1. ROAD_BLOCKED "Tree fallen, road blocked" ~600 m from centre, VERIFIED, created 30 min before seed time.
+2. POWER_OUTAGE "No electricity in whole street" ~900 m, NEW, 45 min before.
+3. FIRE, ~3 km, RESOLVED 2 h before.
+
+The demo flood incident is **not** seeded; it is created live during the demo.
+
+**Mock-only extras (mockData.ts):** canned transcript used for any voice note in mock mode: "Flood water has entered our house. My grandmother cannot walk and we are stuck upstairs." A mock "inject second report" action (DevToolbar button inside Layout when `VITE_USE_MOCK=true`) submits: "Several people are trapped near Central Street" from a different deviceId at the demo centre.
+
+---
+
+## 13. Build plan (24 hours)
+
+| Hours | Phase | Deliverable | Owners |
+|---|---|---|---|
+| 0–2 | A. Foundation | Repo, all files created as empty stubs, `shared/types.ts` + `constants.ts` complete, `App.tsx` routes, `data/index.ts` Api interface, Supabase schema + seed, Ollama + Whisper + ffmpeg tested, HTTPS tunnel tested on a phone | Lead + Backend |
+| 2–8 | B. UI on mocks | Every screen working with `VITE_USE_MOCK=true`; all `shared/` rule functions + tests | Everyone |
+| 8–15 | C. Real backend | All server routes + pipeline (keywords path first, then Ollama, then Whisper); switch `VITE_USE_MOCK=false` | Backend, Lead |
+| 15–18 | D. Secondary | Escalation, resources, fake OTP, nearby banner, live dictation | Assigned owners |
+| 18–21 | E. Testing | Full demo on 2 phones + laptop incl. airplane mode; fix bugs | Everyone |
+| 21–24 | F. Demo prep | Reset works, demo script rehearsed, backup video recorded. **No new features after hour 21.** | Everyone |
+
+**Team ownership**
+
+| Owner | Files |
+|---|---|
+| Lead | `shared/types.ts`, `shared/constants.ts`, `App.tsx`, `src/data/*`, `supabase/schema.sql`, `server/scripts/seed.ts`, `server/index.ts`, merging |
+| Victim side | Home, Report, ReportSent, Track, `offline/*`, `lib/codes.ts`, `lib/media.ts`, VoiceRecorder, `shared/keywordExtractor.ts`, `routes/victim.ts` |
+| Admin side | admin pages, Badges, ReasonList, Modal, `routes/admin.ts` |
+| Volunteer + map | volunteer pages, PublicMap, SafetyMap, ChatBox, `routes/volunteer.ts`, `routes/messages.ts`, `routes/public.ts`, `shared/publicView.ts`, `shared/volunteerMatch.ts` |
+| Backend + AI | `server/ai.ts`, `transcribe.ts`, `pipeline.ts`, `storage.ts`, `supabase.ts`, `auth.ts`, `mappers.ts`, `shared/scoring.ts`, `shared/linking.ts`, `shared/trackingStatus.ts` |
+
+**Git:** `main` always runs. Branch per feature `feat/F07-duplicates`. Small PRs, lead merges, merge at least every 3 hours, tag `demo-ok` when a full demo run passes.
+
+---
+
+## 14. Risks and fallbacks
+
+| Risk | Fallback | Cut order if late |
+|---|---|---|
+| Ollama slow/bad JSON | Keyword extractor (automatic) | Use keywords only |
+| Whisper slow/inaccurate (Tamil) | `small` model; admin plays audio; keyboard mic | Cut live dictation (F24) |
+| Venue internet down (Supabase is cloud) | Phone hotspot for laptop; backup video | — |
+| GPS/mic blocked | HTTPS tunnel from hour 1; text location field | — |
+| Map tiles fail | List view | — |
+| Out of time | Mock mode runs full demo | Nearby banner → fake OTP → resources → escalation → related incidents → voice messages in chat |
+
+**Never cut:** F01 report, F02 offline, F03 voice note, F05 AI/keywords, F06 incident, F09/F10 scores, F12–F14 admin, F15–F16 volunteer, F17 chat, F19 public map.

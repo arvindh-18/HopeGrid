@@ -1,0 +1,162 @@
+// src/components/Layout.tsx — header, role navigation, offline banner, emergency banner, demo menu.
+import { useEffect, useState, type ReactNode } from 'react';
+import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { EMERGENCY_NUMBER, api, devTools } from '../data';
+import { homeFor, useAuth } from '../hooks/useAuth';
+import { isForcedOffline, setForcedOffline, useOnline } from '../offline/useOnline';
+import { IconClose, IconFlask, IconMenu, IconPhone, IconWifiOff } from './Icons';
+import { Toggle, useToast } from './ui';
+
+type Variant = 'public' | 'admin' | 'volunteer';
+
+interface LayoutProps {
+  variant?: Variant;
+  /** S01–S04 show the emergency number (AR-26). */
+  emergency?: boolean;
+  /** Narrow single column (victim/volunteer) or wide workspace (admin). */
+  width?: 'narrow' | 'wide';
+  children: ReactNode;
+}
+
+const NAV: Record<Variant, { to: string; label: string; end?: boolean }[]> = {
+  public: [
+    { to: '/report', label: 'Report' },
+    { to: '/track', label: 'Track a report' },
+    { to: '/map', label: 'Safety map' },
+  ],
+  admin: [
+    { to: '/admin', label: 'Incidents', end: true },
+    { to: '/admin/resources', label: 'Resources' },
+    { to: '/map', label: 'Public map' },
+  ],
+  volunteer: [
+    { to: '/volunteer', label: 'My assignments', end: true },
+    { to: '/map', label: 'Safety map' },
+  ],
+};
+
+function Logo() {
+  return (
+    <Link to="/" className="flex items-center gap-2.5 text-white no-underline" aria-label="HopeGrid home">
+      <svg width="28" height="28" viewBox="0 0 64 64" aria-hidden>
+        <path d="M32 12 52 48H12Z" fill="none" stroke="#c7eb08" strokeWidth="6" strokeLinejoin="round" />
+        <path d="M32 27v8" stroke="#c7eb08" strokeWidth="6" strokeLinecap="round" />
+        <circle cx="32" cy="42" r="3.2" fill="#c7eb08" />
+      </svg>
+      <span className="font-display text-[17px] tracking-[-0.2px]">HopeGrid</span>
+    </Link>
+  );
+}
+
+export function Layout({ variant = 'public', emergency, width = 'narrow', children }: LayoutProps) {
+  const online = useOnline();
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [menuOpen, setMenuOpen] = useState(false);
+  useEffect(() => setMenuOpen(false), [location.pathname]);
+
+  const links = NAV[variant];
+  const linkCls = ({ isActive }: { isActive: boolean }) =>
+    `rounded-full px-3.5 py-2 text-[15px] no-underline transition-colors ${isActive ? 'bg-white/12 text-white' : 'text-white/75 hover:text-white'}`;
+
+  return (
+    <div className="flex min-h-screen flex-col">
+      <header className="sticky top-0 z-[1000] bg-dark text-white" style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}>
+        <div className={`mx-auto flex h-16 items-center gap-4 px-4 sm:px-6 ${width === 'wide' ? 'max-w-[1440px]' : 'max-w-5xl'}`}>
+          <Logo />
+          <nav className="ml-4 hidden items-center gap-1 md:flex" aria-label="Main">
+            {links.map((l) => <NavLink key={l.to} to={l.to} end={l.end} className={linkCls}>{l.label}</NavLink>)}
+          </nav>
+          <div className="ml-auto hidden items-center gap-3 md:flex">
+            {user ? (
+              <>
+                {variant === 'public' && <Link to={homeFor(user)} className="text-[14px] text-white/75 no-underline hover:text-white">My workspace</Link>}
+                <span className="text-[14px] text-white/75">{user.name}</span>
+                <button type="button" onClick={() => { logout(); navigate('/'); }} className="rounded-full bg-white px-4 py-2 text-[14px] font-medium text-ink">Log out</button>
+              </>
+            ) : (
+              variant === 'public' && <Link to="/login" className="rounded-full bg-white/10 px-4 py-2 text-[14px] text-white no-underline hover:bg-white/20">Staff login</Link>
+            )}
+          </div>
+          <button type="button" className="ml-auto grid h-10 w-10 place-items-center rounded-full hover:bg-white/10 md:hidden" aria-expanded={menuOpen} aria-label="Menu" onClick={() => setMenuOpen((v) => !v)}>
+            {menuOpen ? <IconClose /> : <IconMenu />}
+          </button>
+        </div>
+        {menuOpen && (
+          <nav className="flex flex-col gap-1 border-t border-white/10 px-4 pb-4 pt-2 md:hidden" aria-label="Main">
+            {links.map((l) => <NavLink key={l.to} to={l.to} end={l.end} className={linkCls}>{l.label}</NavLink>)}
+            {user ? (
+              <button type="button" onClick={() => { logout(); navigate('/'); }} className="mt-2 self-start rounded-full bg-white px-4 py-2 text-[14px] font-medium text-ink">Log out {user.name}</button>
+            ) : (
+              <NavLink to="/login" className={linkCls}>Staff login</NavLink>
+            )}
+          </nav>
+        )}
+        {!online && (
+          <div className="flex items-center justify-center gap-2 bg-[#fbf2cf] px-4 py-2 text-[14px] text-[#5c4600]" role="status">
+            <IconWifiOff size={18} />
+            <span>You're offline.{variant === 'public' ? ' You can still report — it will send automatically.' : ' Showing the last information we had.'}</span>
+          </div>
+        )}
+      </header>
+
+      {emergency && (
+        <div className="bg-white">
+          <div className="mx-auto flex max-w-5xl items-center gap-3 px-4 py-2.5 text-[14px] sm:px-6">
+            <IconPhone size={18} className="text-danger" />
+            <span>In danger right now? If you can call, call <a href={`tel:${EMERGENCY_NUMBER}`} className="font-medium text-danger">{EMERGENCY_NUMBER}</a>.</span>
+          </div>
+        </div>
+      )}
+
+      <main className={`mx-auto w-full flex-1 px-4 py-6 sm:px-6 sm:py-8 ${width === 'wide' ? 'max-w-[1440px]' : 'max-w-5xl'}`}>{children}</main>
+      <DemoMenu />
+    </div>
+  );
+}
+
+// ---------- Demo menu (mock mode, or DEV builds) — features.md F23 ----------
+function DemoMenu() {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [offline, setOffline] = useState(isForcedOffline());
+  const [realLoc, setRealLoc] = useState(devTools?.usingRealLocation() ?? false);
+  const { login } = useAuth();
+  const navigate = useNavigate();
+  const toast = useToast();
+  const dev = devTools;
+  if (!dev && !import.meta.env.DEV) return null;
+
+  async function run(fn: () => Promise<void>, done: string) {
+    setBusy(true);
+    try { await fn(); toast(done); setOpen(false); } catch (e) { toast(e instanceof Error ? e.message : 'Action failed', 'error'); } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="fixed right-3 top-[76px] z-[1200] flex flex-col-reverse items-end gap-2 sm:bottom-4 sm:left-4 sm:right-auto sm:top-auto sm:flex-col sm:items-start">
+      {open && (
+        <div className="w-72 rounded-[16px] bg-white p-4 shadow-[var(--shadow-overlay)]">
+          <p className="t-title-sm mb-1">Demo</p>
+          <p className="t-caption mb-3">{dev ? 'Mock data mode — nothing leaves this browser.' : 'Development build.'}</p>
+          <div className="flex flex-col gap-2">
+            <button type="button" className="btn btn-outline btn-sm" disabled={busy} onClick={() => run(async () => { dev ? await dev.reset() : await api.resetDemo(); navigate('/'); }, 'Demo data reset')}>Reset demo data</button>
+            {dev && (
+              <>
+                <button type="button" className="btn btn-outline btn-sm" disabled={busy} onClick={() => run(async () => { await dev.injectSecondReport(); }, 'Second report sent from another phone')}>Inject second report</button>
+                <button type="button" className="btn btn-outline btn-sm" disabled={busy} onClick={() => run(async () => { await login(dev.accounts.admin, dev.accounts.password); navigate('/admin'); }, 'Signed in as Coordinator')}>Switch to Admin</button>
+                <button type="button" className="btn btn-outline btn-sm" disabled={busy} onClick={() => run(async () => { await login(dev.accounts.volunteer, dev.accounts.password); navigate('/volunteer'); }, 'Signed in as Ravi')}>Switch to Volunteer (Ravi)</button>
+                <label className="mt-1 flex items-center justify-between gap-3 text-[14px]">Simulate offline <Toggle label="Simulate offline" checked={offline} onChange={(v) => { setForcedOffline(v); setOffline(v); }} /></label>
+                <label className="flex items-center justify-between gap-3 text-[14px]">Use my real GPS <Toggle label="Use my real GPS" checked={realLoc} onChange={(v) => { dev.setUseRealLocation(v); setRealLoc(v); }} /></label>
+                <button type="button" className="btn btn-ghost btn-sm justify-start" onClick={() => { dev.failNextRequest(); toast('The next request will fail', 'info'); }}>Make next request fail</button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+      <button type="button" onClick={() => setOpen((v) => !v)} className="flex items-center gap-2 rounded-full bg-lime px-3.5 py-2 sm:px-4 sm:py-2.5 text-[14px] font-medium text-ink shadow-[var(--shadow-float)]" aria-expanded={open}>
+        <IconFlask size={18} /> Demo
+      </button>
+    </div>
+  );
+}

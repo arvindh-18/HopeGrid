@@ -1,0 +1,174 @@
+@import 'tailwindcss';
+
+/* Design tokens — derived from docs/DESIGN.md (canvas + ink + lime voltage, dark nav, pill CTAs),
+   extended with the severity scale this product needs (critical/high/medium/low). */
+@theme {
+  --color-canvas: #f4f4f4;
+  --color-elevated: #ffffff;
+  --color-strong: #e6e6e6;
+  --color-dark: #212121;
+  --color-dark-hover: #1e1e1e;
+  --color-ink: #000000;
+  --color-body: #222222;
+  --color-muted: #5d5d5d;
+  --color-faint: #979797;
+  --color-hairline: #d0d0d0;
+  --color-lime: #c7eb08;
+  --color-lime-dark: #a5c406;
+  --color-link: #014adb;
+  --color-danger: #c13515;
+  --color-danger-dark: #a32b10;
+  --color-success: #2c622c;
+
+  --font-display: 'Plus Jakarta Sans', 'Altriviera', Arial, sans-serif;
+  --font-sans: 'DM Sans', 'Alt Riviera', Arial, sans-serif;
+
+  --radius-input: 5px;
+  --radius-card: 16px;
+  --radius-pill: 999px;
+
+  --shadow-float: 0 4px 16px rgba(0, 0, 0, 0.12);
+  --shadow-overlay: 0 8px 32px rgba(0, 0, 0, 0.25);
+  --ease-brand: cubic-bezier(0.6, 0.6, 0, 1);
+}
+
+@layer base {
+:root {
+  color-scheme: light;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-canvas);
+  color: var(--color-body);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.5;
+  letter-spacing: -0.16px;
+  -webkit-font-smoothing: antialiased;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+h1, h2, h3, h4 {
+  margin: 0;
+  color: var(--color-ink);
+  font-family: var(--font-display);
+  font-weight: 400;
+}
+
+a {
+  color: var(--color-link);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-ink);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 5px var(--color-lime);
+  border-radius: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+}
+
+@layer components {
+  /* ---------- Type scale (DESIGN.md typography, negative tracking) ---------- */
+  .t-display { font-family: var(--font-display); font-size: clamp(34px, 7vw, 54px); line-height: 1.02; letter-spacing: -0.81px; font-weight: 400; color: var(--color-ink); }
+  .t-title-lg { font-family: var(--font-display); font-size: 32px; line-height: 1.15; letter-spacing: -0.32px; font-weight: 400; color: var(--color-ink); }
+  .t-title-md { font-family: var(--font-display); font-size: 24px; line-height: 1.25; letter-spacing: -0.3px; font-weight: 500; color: var(--color-ink); }
+  .t-title-sm { font-family: var(--font-display); font-size: 18px; line-height: 1.3; letter-spacing: -0.15px; font-weight: 600; color: var(--color-ink); }
+  .t-body-sm { font-size: 14px; line-height: 1.45; letter-spacing: -0.14px; }
+  .t-caption { font-size: 13px; line-height: 1.38; letter-spacing: -0.12px; color: var(--color-muted); }
+
+  /* ---------- Buttons ---------- */
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    min-height: 44px; padding: 10px 22px; border-radius: var(--radius-pill);
+    font-size: 14px; font-weight: 500; line-height: 1.25; letter-spacing: 0;
+    border: 1px solid transparent; cursor: pointer; text-decoration: none; white-space: nowrap;
+    transition: background-color 0.2s var(--ease-brand), color 0.2s var(--ease-brand), border-color 0.2s var(--ease-brand);
+  }
+  .btn:disabled, .btn[aria-disabled='true'] { opacity: 0.45; cursor: not-allowed; }
+  .btn-primary { background: var(--color-ink); color: #fff; }
+  .btn-primary:not(:disabled):hover { background: #333; }
+  .btn-lime { background: var(--color-lime); color: #000; }
+  .btn-lime:not(:disabled):hover { background: var(--color-lime-dark); }
+  .btn-danger { background: var(--color-danger); color: #fff; }
+  .btn-danger:not(:disabled):hover { background: var(--color-danger-dark); }
+  .btn-outline { background: transparent; color: var(--color-dark); border-color: var(--color-dark); border-radius: var(--radius-card); }
+  .btn-outline:not(:disabled):hover { background: rgba(0, 0, 0, 0.05); }
+  .btn-ghost { background: transparent; color: var(--color-body); padding-left: 12px; padding-right: 12px; }
+  .btn-ghost:not(:disabled):hover { background: rgba(0, 0, 0, 0.06); }
+  .btn-sm { min-height: 36px; padding: 6px 14px; font-size: 13px; }
+  .btn-lg { min-height: 52px; padding: 14px 28px; font-size: 15px; }
+  .btn-block { width: 100%; }
+
+  /* ---------- Inputs ---------- */
+  .input {
+    width: 100%; min-height: 44px; padding: 10px 14px; border-radius: var(--radius-input);
+    background: #fff; color: var(--color-ink); border: 1px solid var(--color-hairline);
+    font: inherit; letter-spacing: inherit; transition: border-color 0.2s var(--ease-brand);
+  }
+  .input::placeholder { color: var(--color-muted); }
+  .input:focus { outline: none; border-color: var(--color-ink); box-shadow: 0 0 0 3px var(--color-lime); }
+  .input[aria-invalid='true'] { border-color: var(--color-danger); }
+  textarea.input { min-height: 112px; resize: vertical; line-height: 1.5; }
+  select.input { appearance: none; background-image: linear-gradient(45deg, transparent 50%, #222 50%), linear-gradient(135deg, #222 50%, transparent 50%); background-position: calc(100% - 18px) 19px, calc(100% - 13px) 19px; background-size: 5px 5px; background-repeat: no-repeat; padding-right: 36px; }
+
+  /* ---------- Chips (multi-select choices) ---------- */
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 8px 16px;
+    border-radius: var(--radius-pill); border: 1px solid var(--color-hairline); background: #fff;
+    color: var(--color-body); font-size: 14px; cursor: pointer; transition: background-color 0.2s var(--ease-brand);
+  }
+  .chip:hover { border-color: var(--color-dark); }
+  .chip[aria-pressed='true'] { background: var(--color-ink); color: #fff; border-color: var(--color-ink); }
+
+  /* ---------- Surfaces ---------- */
+  .card { background: var(--color-elevated); border-radius: var(--radius-card); }
+  .card-pad { padding: 20px; }
+  @media (min-width: 640px) { .card-pad { padding: 24px; } }
+  .divider { border-top: 1px solid var(--color-strong); }
+
+  /* ---------- Tone badges (severity + status) ---------- */
+  .tag {
+    display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: var(--radius-pill);
+    font-size: 12.5px; font-weight: 500; line-height: 1.4; letter-spacing: 0; white-space: nowrap;
+  }
+  .tag .dot { width: 7px; height: 7px; border-radius: 99px; background: currentColor; flex: none; }
+  .tone-critical { background: #fbe7e2; color: #9e2a10; }
+  .tone-high { background: #fdeedd; color: #924400; }
+  .tone-medium { background: #fbf2cf; color: #6d5300; }
+  .tone-low, .tone-ok { background: #e3eee3; color: #2c622c; }
+  .tone-neutral { background: #ececec; color: #333; }
+  .tone-info { background: #e3eafa; color: #0b3fa6; }
+  .tone-lime { background: var(--color-lime); color: #000; }
+  .tone-solid-critical { background: var(--color-danger); color: #fff; }
+
+  /* ---------- Skeleton ---------- */
+  .skeleton { background: linear-gradient(90deg, #e9e9e9 25%, #f2f2f2 50%, #e9e9e9 75%); background-size: 200% 100%; animation: shimmer 1.4s infinite; border-radius: 8px; }
+}
+
+@keyframes shimmer { to { background-position: -200% 0; } }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pulse-ring { 0% { box-shadow: 0 0 0 0 rgba(193, 53, 21, 0.45); } 100% { box-shadow: 0 0 0 18px rgba(193, 53, 21, 0); } }
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+/* Leaflet: keep tiles under our overlays and use our font in popups */
+.leaflet-container { font-family: var(--font-sans); background: #e8e8e4; }
+.hazard-pin { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35); font-size: 16px; }
+.hazard-pin.selected { outline: 3px solid var(--color-ink); outline-offset: 1px; }
+.pin-RED { background: #c13515; }
+.pin-ORANGE { background: #e07a10; }
+.pin-YELLOW { background: #e8c21a; }
+.pin-GREEN { background: #2c622c; }

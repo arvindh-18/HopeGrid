@@ -1,0 +1,11 @@
+node_modules
+dist
+dev-dist
+.env
+tmp/
+# Local model files (whisper/ollama) are large and machine-specific
+models/*
+!models/.gitkeep
+# Uploaded media (server phase)
+data/uploads/*
+!data/uploads/.gitkeep
