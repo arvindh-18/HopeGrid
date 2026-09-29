@@ -10,8 +10,28 @@ function notConnected(endpoint: string): never {
   throw new ApiError('SERVER_ERROR', `The server is not connected yet (${endpoint}).`);
 }
 
+/** JSON request to /api. Parses the error envelope (§8.1) into ApiError; fetch failures → NETWORK. */
+async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(`/api${path}`, {
+      method,
+      headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch {
+    throw new ApiError('NETWORK', "You're offline or the server can't be reached.");
+  }
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    const err = data?.error;
+    throw new ApiError(err?.code ?? 'SERVER_ERROR', err?.message ?? `The server returned an error (${res.status}).`);
+  }
+  return data as T;
+}
+
 export const realApi: Api = {
-  async submitReport(_sub) { return notConnected('POST /api/reports'); },
+  async submitReport(sub) { return request('POST', '/reports', sub); },
   async track(_code, _pin) { return notConnected('POST /api/track'); },
   async verifyPhone(_code, _pin, _phone, _otp) { return notConnected('POST /api/track/verify-phone'); },
   async getVictimChat(_code, _pin) { return notConnected('POST /api/track/chat'); },

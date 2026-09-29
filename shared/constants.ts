@@ -9,6 +9,12 @@ export const EMERGENCY_NUMBER = '112';
 export const DEMO_OTP = '123456';
 export const DEMO_CENTER = { lat: 13.0405, lng: 80.2337 };
 
+// BR-03 submission validation
+export const MIN_REPORT_TEXT = 5;
+export const MAX_PEOPLE = 500;
+export const PHONE_MIN_DIGITS = 7;
+export const PHONE_MAX_DIGITS = 15;
+
 export const MAX_AUDIO_SECONDS = 60;
 export const MAX_PHOTO_BASE64 = 3_000_000;
 export const MAX_AUDIO_BASE64 = 3_000_000;

@@ -10,7 +10,7 @@ Specs: `docs/architecture.md`, `docs/features.md`, `docs/rules.md`, `docs/DESIGN
 |---|---|
 | Frontend (`src/`) | Complete UI skeleton. Calls `realApi`, whose functions are still stubs, so screens show "server is not connected" until the backend exists |
 | Shared rules (`shared/`) | Implemented and tested (22 tests) |
-| Backend (`server/`, `data/`) | Empty placeholder files. Not implemented yet |
+| Backend (`server/`, `supabase/`) | F01 done: `POST /api/reports` (validation, idempotency, media upload). Other routes not implemented yet |
 
 Details, assumptions and per-feature integration points: `UI_SKELETON_STATUS.md`.
 
@@ -18,11 +18,14 @@ Details, assumptions and per-feature integration points: `UI_SKELETON_STATUS.md`
 
 ```bash
 npm install
-npm run dev        # http://localhost:5173 (proxies /api to http://localhost:3000)
+npm run dev        # web on http://localhost:5173 + API server on http://localhost:3000
 npm test           # business-rule tests
 npm run build      # typecheck + production build + service worker
 npm run preview    # serve the production build
+npm start          # API server serving the production build (dist/)
 ```
+
+Requires Node.js 22.12+. Before the first run: run `supabase/schema.sql` once in the Supabase SQL editor and fill in `.env` (see `.env.example`).
 
 In dev builds, the lime **Demo** button can reset demo data (`/api/dev/reset`) or simulate offline.
 
@@ -40,13 +43,11 @@ hopegrid/
 │   ├── components/ hooks/ lib/ pages/
 ├── tests/                rule tests (vitest)
 ├── public/               PWA icon
-├── server/               EMPTY placeholders for the backend
-├── data/                 EMPTY placeholders (schema.sql, seed.sql, seed.json, db.json, uploads/)
+├── server/               Express API (Supabase via service role)
+├── supabase/             schema.sql (run once in the Supabase SQL editor)
 └── models/               local AI/speech model files (gitignored)
 ```
 
 ## Connecting the backend
 
 Pages only call `src/data/index.ts`. When the backend exists, replace the stubs in `src/data/realApi.ts` (each names its endpoint). The dev server already proxies `/api` to `http://localhost:3000`.
-
-**Note:** the placeholder backend layout (`server/db.ts`, `data/db.json`, `data/schema.sql`, `routes/auth.ts`) follows an earlier JSON-database plan. The current `docs/architecture.md` (v3) uses Supabase with `supabase/schema.sql`, `server/supabase.ts`, `storage.ts`, `mappers.ts`, `routes/authRoutes.ts`, `routes/dev.ts` and `server/scripts/seed.ts`. Decide which layout to follow before starting backend work.

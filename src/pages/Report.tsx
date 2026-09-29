@@ -1,6 +1,7 @@
 // S02 Report — works fully offline (AR-25): no map tiles, no network calls on this page.
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { MIN_REPORT_TEXT, PHONE_MAX_DIGITS, PHONE_MIN_DIGITS } from '../../shared/constants';
 import { NEEDS, type Need, type ReportSubmission } from '../../shared/types';
 import { IconCamera, IconPin, IconTrash } from '../components/Icons';
 import { Layout } from '../components/Layout';
@@ -15,7 +16,9 @@ import { getDeviceId } from '../offline/deviceId';
 import * as outbox from '../offline/outbox';
 
 type Loc = { state: 'locating' } | { state: 'ok'; pos: Position } | { state: 'error'; message: string };
-const PHONE_RE = /^\+?[\d ]{7,17}$/;
+// BR-03: digits with optional leading +. Spaces typed by the user are removed before checking and sending.
+const PHONE_RE = new RegExp(`^\\+?\\d{${PHONE_MIN_DIGITS},${PHONE_MAX_DIGITS}}$`);
+const cleanPhone = (raw: string) => raw.replace(/\s+/g, '');
 
 export default function Report() {
   const navigate = useNavigate();
@@ -44,9 +47,9 @@ export default function Report() {
   useEffect(locate, []);
 
   // BR-03 — what is still missing before we can send.
-  const hasContent = text.trim().length >= 5 || !!voice || needs.length > 0;
+  const hasContent = text.trim().length >= MIN_REPORT_TEXT || !!voice || needs.length > 0;
   const hasLocation = loc.state === 'ok' || locationText.trim().length > 0 || !!voice;
-  const phoneOk = !phone.trim() || PHONE_RE.test(phone.trim());
+  const phoneOk = !phone.trim() || PHONE_RE.test(cleanPhone(phone));
   const missing = [
     !hasContent && 'describe what happened, record your voice, or choose the help you need',
     !hasLocation && 'add where you are',
@@ -84,7 +87,7 @@ export default function Report() {
         locationText: locationText.trim() || null,
         people: people?.value ?? null,
         needs,
-        phone: phone.trim() || null,
+        phone: cleanPhone(phone) || null,
         photoBase64: photo,
         audioBase64: voice?.base64 ?? null,
         audioMime: voice?.mime ?? null,
@@ -193,7 +196,7 @@ export default function Report() {
         </section>
 
         <section className="card card-pad">
-          <Field label="Phone number" htmlFor="phone" optional hint="Only the coordination team sees it. Volunteers never do." error={triedSubmit && !phoneOk ? 'Phone number should be 7–15 digits.' : null}>
+          <Field label="Phone number" htmlFor="phone" optional hint="Only the coordination team sees it. Volunteers never do." error={triedSubmit && !phoneOk ? `Phone number should be ${PHONE_MIN_DIGITS}–${PHONE_MAX_DIGITS} digits.` : null}>
             <input id="phone" className="input" type="tel" inputMode="tel" autoComplete="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+91 98400 00000" aria-invalid={triedSubmit && !phoneOk} />
           </Field>
         </section>
