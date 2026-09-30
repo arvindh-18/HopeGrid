@@ -1,7 +1,9 @@
 // server/scripts/build-apk.ts — `npm run app:apk`: builds the website, copies it into the Android project
 // (Capacitor sync) and builds an installable debug APK at ./HopeGrid.apk.
 // Uses Android Studio's bundled Java (Gradle does not run on very new Java versions) and the default SDK folder.
-// Optional: VITE_SERVER_URL=https://… npm run app:apk bakes in a server address (it can still be changed in the app).
+// The server address is built in from PUBLIC_SERVER_URL in .env (or VITE_SERVER_URL=https://… npm run app:apk);
+// it can still be changed in the app under Menu → Server.
+import 'dotenv/config';
 import { execSync } from 'node:child_process';
 import { copyFileSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -11,6 +13,8 @@ const STUDIO_JAVA = '/Applications/Android Studio.app/Contents/jbr/Contents/Home
 const env = { ...process.env };
 if (!env.JAVA_HOME && existsSync(STUDIO_JAVA)) env.JAVA_HOME = STUDIO_JAVA;
 if (!env.ANDROID_HOME) env.ANDROID_HOME = join(homedir(), 'Library/Android/sdk');
+const publicUrl = env.PUBLIC_SERVER_URL?.trim();
+if (!env.VITE_SERVER_URL && publicUrl && !publicUrl.includes('your-domain')) env.VITE_SERVER_URL = publicUrl;
 if (!env.JAVA_HOME) {
   console.error('Java for Android not found. Install Android Studio, or set JAVA_HOME to a JDK 17 or 21.');
   process.exit(1);

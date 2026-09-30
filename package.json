@@ -14,6 +14,7 @@
     "start": "tsx server/index.ts",
     "tunnel": "cloudflared tunnel --url http://localhost:3000",
     "tunnel:vercel": "tsx server/scripts/tunnel-vercel.ts",
+    "tunnel:ngrok": "tsx server/scripts/tunnel-ngrok.ts",
     "app:apk": "tsx server/scripts/build-apk.ts",
     "app:open": "cap open android",
     "preview": "vite preview",
