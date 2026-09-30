@@ -39,6 +39,13 @@ Background for every item is in `PROJECT.md` (kept in ~/Downloads) and in `CHANG
 
 ---
 
+## 📱 Android app
+- [ ] Install `HopeGrid.apk` on a real Android phone and run through `HopeGrid-App-Guide.pdf` once: server
+      address, map, voice note, **photo from the camera** (not tested in the emulator), and a volunteer assignment.
+- [ ] Decide whether to commit `android/` (53 files, ~340 KB; builds and the APK are git-ignored).
+- [ ] Optional: a fixed server address (ngrok static domain or a Cloudflare domain), so phones never need a new address.
+- [ ] iOS: needs Xcode + an Apple Developer account; not set up.
+
 ## 🟠 For the judges (only you can do these)
 - [ ] **Fill in the hackathon track** in `docs/problem.md` (top of the file).
 - [ ] **Run one tabletop exercise with real people** (plan and feedback template in `docs/impact-and-deployment.md`

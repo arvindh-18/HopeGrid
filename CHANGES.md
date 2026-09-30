@@ -187,6 +187,43 @@ Requested: "show reports only up to a certain radius" on the safety map.
   reached." (translated) instead of "The server returned an error (502)". The map's error box uses the chosen language.
   Reports are unaffected: they stay queued on the phone and retry, as before.
 
+## Android app (2026-09-30)
+
+Requested: turn the website into an app, plus a PDF on how to use it.
+
+- **How:** Capacitor 6 wraps the existing React app. Every screen, language and feature is the same code as the
+  website. Capacitor 6 rather than 8 because it matches the Android tools on this Mac (Java 17 in Android Studio,
+  SDK 34); 8 needs Java 21 and SDK 35+.
+- **What changed in the code:**
+  - `src/lib/serverUrl.ts` (new): the app needs the server's full address. The website still uses its own site,
+    so it's unchanged. In the app the address is entered on first start (`src/pages/ServerSetup.tsx`, which checks
+    it before saving) and can be changed under Menu → Server, so a new tunnel address needs no rebuild. It can also
+    be built in with `VITE_SERVER_URL`.
+  - `src/data/realApi.ts`: requests go to that address.
+  - `src/main.tsx`: no offline service worker inside the app, since its files are already on the phone.
+  - WhatsApp assignment links use the server address (`publicWebUrl()`), because the app's own address would
+    point at the phone.
+  - `server/cors.ts` (new, mounted in `server/index.ts`): the server now accepts calls from the app's origins
+    (`https://localhost`, `capacitor://localhost`) only. Logins are bearer tokens, not cookies.
+  - Android project `android/`:
+    - permissions for location, microphone and camera
+    - HopeGrid icon and splash screen
+    - `npm run app:apk` → `HopeGrid.apk`; `npm run app:open` opens Android Studio
+- **New dependencies (approved):** `@capacitor/core`, `@capacitor/android` 6.2.2; `@capacitor/cli` 6.2.2 (dev).
+- **Evidence (2026-09-30):**
+  - 4 new tests (app access to the server; address clean-up); **102 tests pass**; type check and build pass
+  - APK built and installed on the Android 14 emulator (Pixel 3a), against a temporary server on port 3001 without AI,
+    through a quick tunnel. Checked:
+    - the first-start screen accepted the tunnel address
+    - Home matches the website
+    - Android's location prompt, then the map with tiles, the radius circle and the hazard pin
+    - the Report screen captured GPS (±5 m)
+    - Android's microphone prompt, then recording ran
+    - coordinator login and the dashboard
+  - No report was sent, and nothing was written to the database.
+- **Not tested:** a real phone; the camera (photo / ID proof) inside the app; live updates in the app (screens fall
+  back to polling if needed); iOS, which needs Xcode (not installed).
+
 ## Only you can do these
 
 - **Rotate the Supabase keys.**

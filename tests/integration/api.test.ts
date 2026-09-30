@@ -752,6 +752,27 @@ describe('Retention clean-up script (server/scripts/cleanup.ts)', () => {
 
 // ------------------------------------------------------------------------------------------------ F23 dev reset
 
+describe('Android app access (CORS)', () => {
+  it('lets the app (https://localhost) call the API, including the preflight for logged-in calls', async () => {
+    const pre = await server.call('OPTIONS', '/admin/incidents', undefined, {
+      headers: { origin: 'https://localhost', 'access-control-request-method': 'GET', 'access-control-request-headers': 'authorization' },
+    });
+    expect(pre.status).toBe(204);
+    expect(pre.headers['access-control-allow-origin']).toBe('https://localhost');
+    expect(pre.headers['access-control-allow-headers']).toContain('Authorization');
+    const res = await server.call('GET', '/public/incidents', undefined, { headers: { origin: 'https://localhost' } });
+    expect(res.status).toBe(200);
+    expect(res.headers['access-control-allow-origin']).toBe('https://localhost');
+  });
+
+  it('gives other websites no access', async () => {
+    const res = await server.call('GET', '/public/incidents', undefined, { headers: { origin: 'https://evil.example' } });
+    expect(res.headers['access-control-allow-origin']).toBeUndefined();
+    const pre = await server.call('OPTIONS', '/admin/incidents', undefined, { headers: { origin: 'https://evil.example', 'access-control-request-method': 'GET' } });
+    expect(pre.headers['access-control-allow-origin']).toBeUndefined();
+  });
+});
+
 describe('Demo reset guard (F23)', () => {
   let dev: TestServer;
   beforeAll(async () => {

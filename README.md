@@ -41,6 +41,12 @@ First-time setup:
 3. `npm run seed` creates the staff accounts and demo data.
 4. In Supabase Auth settings, set JWT expiry to 86400 s so staff sessions last the whole demo.
 
+Android app: the same app packaged with Capacitor 6 (`android/`, `capacitor.config.ts`). `npm run app:apk` builds
+`HopeGrid.apk` (uses Android Studio's Java and SDK); install it on a phone, then enter the server's https address
+(e.g. the `npm run tunnel` link) on the first screen. Change it later under Menu → Server, so a new tunnel address
+needs no new build. The server allows the app's origin (`server/cors.ts`). iOS needs Xcode and is not set up.
+Step-by-step guide: `HopeGrid-App-Guide.pdf` (next to the repo folder).
+
 Website on Vercel, server on this laptop: `vercel.json` makes Vercel serve the pages and forward `/api/*` to the
 laptop. Run `npm start`, then `npm run tunnel:vercel` (keep both open). It starts a Cloudflare quick tunnel and writes
 its address into `vercel.json`; commit and push that file so Vercel redeploys. The quick-tunnel address changes each

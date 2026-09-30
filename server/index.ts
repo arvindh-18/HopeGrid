@@ -7,6 +7,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ApiError, type ErrorCode } from '../shared/types';
 import { loadAiModel } from './ai';
+import { appCors } from './cors';
 import { processPendingReports } from './pipeline';
 import { adminRouter } from './routes/admin';
 import { applicationsRouter } from './routes/applications';
@@ -32,6 +33,7 @@ const HTTP_STATUS: Record<ErrorCode, number> = {
 };
 
 const app = express();
+app.use('/api', appCors); // the Android app calls from https://localhost
 app.use(express.json({ limit: '15mb' }));
 
 app.use('/api', victimRouter);

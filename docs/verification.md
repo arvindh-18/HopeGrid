@@ -5,7 +5,7 @@ reproduce. Nothing here was estimated.
 
 | | |
 |---|---|
-| Date | 2026-09-29, 19:25 IST; counts updated 2026-09-30 (volunteer registration F26, then the map radius BR-85) |
+| Date | 2026-09-29, 19:25 IST; counts updated 2026-09-30 (volunteer registration F26, map radius BR-85, Android app) |
 | Machine | Apple M2, macOS 26.5.2 |
 | Node.js | v22.23.3 |
 | Test runner | Vitest 5.0.1 |
@@ -18,20 +18,21 @@ reproduce. Nothing here was estimated.
 |---|---|---|
 | Type check (frontend + tests, and strict server) | `npm run typecheck` | exit 0, no errors |
 | Business-rule unit tests | `npm test` (file `tests/rules.test.ts`) | 29 passed |
-| API integration tests | `npm test` (file `tests/integration/api.test.ts`) | 67 passed |
+| API integration tests | `npm test` (file `tests/integration/api.test.ts`) | 69 passed |
 | WhatsApp link builder | `npm test` (file `tests/whatsapp.test.ts`) | 2 passed |
-| **All tests** | `npm test` | **98 passed, 0 failed** (3 files, ~3.6 s — the live-signal tests wait for signal windows) |
+| Android app server address | `npm test` (file `tests/serverUrl.test.ts`) | 2 passed |
+| **All tests** | `npm test` | **102 passed, 0 failed** (4 files, ~3.6 s — the live-signal tests wait for signal windows) |
 | Production build | `npm run build` | exit 0 (`built in 347ms`, 22 files precached) |
 | Tests catch real bugs | 16 deliberate code breaks, see §4 | 16 of 16 caught |
 
-Output of `npx vitest run` (end), after adding the map radius (BR-85):
+Output of `npx vitest run` (end), after adding the Android app:
 ```
- Test Files  3 passed (3)
-      Tests  98 passed (98)
-   Duration  3.62s (tests 82%, transform 14%, import 5%)
+ Test Files  4 passed (4)
+      Tests  102 passed (102)
+   Duration  3.93s (tests 72%, transform 21%, import 7%)
 ```
 (Earlier runs: 68 tests after Phase 2, 74 after Phase 4, 83 after the approved follow-ups, 85 with the WhatsApp link
-tests, 97 with volunteer registration. The suite was also run 3 times in a row after adding the stream tests: 83/83 each time.)
+tests, 97 with volunteer registration, 98 with the map radius. The suite was also run 3 times in a row after adding the stream tests: 83/83 each time.)
 
 ---
 
@@ -53,7 +54,7 @@ models, so the wiring is copied and must be kept in sync.
 
 ---
 
-## 3. What is covered (all 98 tests)
+## 3. What is covered (all 102 tests)
 
 ### API integration tests (67)
 **Report submission (F01, BR-02, BR-03)**
@@ -195,6 +196,7 @@ M14–M16 (2026-09-30) were checked with the volunteer-registration group only (
 | Upload signature check on real files | Files made with the bundled ffmpeg: WebM/Opus, MP4/AAC, Ogg/Opus audio, a JPEG, a PNG | 9 of 9 cases correct (valid files accepted; PNG as photo, MP4 labelled WebM, JPEG as audio, non-base64 rejected) |
 | Real browser recordings pass the check | Chrome 154 `MediaRecorder` (fake microphone) — default, `audio/webm`, `audio/mp4` | All accepted: `audio/webm;codecs=opus` (starts `1a45dfa3`), `audio/mp4;codecs=opus` (`ftyp` at byte 4) |
 | Live-signal client in a real browser | Headless Chrome, real frontend, stand-in API on a spare port, coordinator dashboard for 20 s | Stream live: no polling, refresh 40 ms after the one signal. Stream endpoint 404: polling every 5 s, no stream retries (docs/scaling.md §7) |
+| Android app on an emulator (2026-09-30) | `HopeGrid.apk` on the Android 14 emulator (Pixel 3a) against a temporary server (port 3001, no AI) through a quick tunnel | Server address accepted and checked; Home as on the web; Android location prompt → map with tiles, radius circle and pin; Report captured GPS (±5 m); microphone prompt → recording ran; coordinator login → dashboard. Not tested: camera, live updates in the app, a real phone |
 | Map radius in a real browser (2026-09-30) | Headless Chrome, the built app, a stand-in API with hazards 1, 4 and 8 km from a simulated GPS position | 5 km (default) showed 2 pins, the dashed circle and "1 more is farther than 5 km."; 2 km → 1; 10 km → 3; the choice survived a reload; Tamil on a 390 px phone fits with no sideways scrolling; with location denied all 3 showed with the note |
 | Volunteer registration screens in a real browser (2026-09-30) | Headless Chrome, real frontend, stand-in API on a spare port. Phone size (390 px): filled the form, attached an ID photo, sent. Laptop: `/admin/volunteers` | Form sent the expected fields (no GPS, area "Anna Nagar", JPEG proof) and showed "Application received"; no sideways scrolling. Admin page showed "Waiting for review (2)" with proof photos, and the Volunteers tab listed 2 volunteers with a WhatsApp link for the one with a phone |
 | Vite dev proxy adds no forwarding headers | Echo server on :3000 behind the Vite proxy | No `X-Forwarded-For`/`CF-Connecting-IP`/`Forwarded`, so the DEV "Reset demo data" button still works |

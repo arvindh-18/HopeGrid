@@ -10,6 +10,7 @@ import { authRouter } from '../../server/routes/authRoutes';
 import { devRouter } from '../../server/routes/dev';
 import { messagesRouter } from '../../server/routes/messages';
 import { publicRouter } from '../../server/routes/public';
+import { appCors } from '../../server/cors';
 import { victimRouter } from '../../server/routes/victim';
 import { volunteerRouter } from '../../server/routes/volunteer';
 import { ApiError, type ErrorCode } from '../../shared/types';
@@ -40,7 +41,7 @@ export interface TestStream {
 }
 
 export interface TestServer {
-  call: <T = any>(method: string, path: string, body?: unknown, opts?: { token?: string; headers?: Record<string, string> }) => Promise<{ status: number; body: T; raw: string }>;
+  call: <T = any>(method: string, path: string, body?: unknown, opts?: { token?: string; headers?: Record<string, string> }) => Promise<{ status: number; body: T; raw: string; headers: import('node:http').IncomingHttpHeaders }>;
   /** Opens a Server-Sent Events request and resolves once the response headers arrive. */
   stream: (method: string, path: string, body?: unknown, opts?: { token?: string }) => Promise<TestStream>;
   close: () => Promise<void>;
@@ -50,6 +51,7 @@ export interface TestServer {
 export async function startTestServer({ devMode = false } = {}): Promise<TestServer> {
   const errors: unknown[] = [];
   const app = express();
+  app.use('/api', appCors);
   app.use(express.json({ limit: '15mb' }));
   app.use('/api', victimRouter);
   app.use('/api', messagesRouter);
@@ -88,7 +90,7 @@ export async function startTestServer({ devMode = false } = {}): Promise<TestSer
         let raw = '';
         res.setEncoding('utf8');
         res.on('data', (c) => (raw += c));
-        res.on('end', () => resolve({ status: res.statusCode ?? 0, body: raw ? JSON.parse(raw) : null, raw }));
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, body: raw ? JSON.parse(raw) : null, raw, headers: res.headers }));
       });
       req.on('error', reject);
       if (payload !== undefined) req.write(payload);

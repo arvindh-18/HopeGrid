@@ -7,6 +7,7 @@ export const en = {
   'nav.track': 'Track a report',
   'nav.map': 'Safety map',
   'nav.staffLogin': 'Staff login',
+  'nav.server': 'Server',
   'nav.menu': 'Menu',
   'offline.public': "You're offline. You can still report — it will send automatically.",
   'emergency.call': 'In danger right now? If you can call, call {n}.',

@@ -14,6 +14,8 @@
     "start": "tsx server/index.ts",
     "tunnel": "cloudflared tunnel --url http://localhost:3000",
     "tunnel:vercel": "tsx server/scripts/tunnel-vercel.ts",
+    "app:apk": "tsx server/scripts/build-apk.ts",
+    "app:open": "cap open android",
     "preview": "vite preview",
     "seed": "tsx server/scripts/seed.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit --strict --target es2022 --module esnext --moduleResolution bundler --skipLibCheck --types node server/index.ts server/scripts/cleanup.ts eval/run.ts eval/bench.ts eval/prompt-experiment.ts eval/diagnose-type-bias.ts",
@@ -24,6 +26,8 @@
     "cleanup": "tsx server/scripts/cleanup.ts"
   },
   "dependencies": {
+    "@capacitor/android": "^6.2.2",
+    "@capacitor/core": "^6.2.2",
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "@fontsource/dm-sans": "^5.3.0",
     "@fontsource/plus-jakarta-sans": "^5.3.0",
@@ -40,6 +44,7 @@
     "react-router-dom": "^7.18.4"
   },
   "devDependencies": {
+    "@capacitor/cli": "^6.2.2",
     "@tailwindcss/vite": "^4.3.3",
     "@types/express": "^5.0.6",
     "@types/leaflet": "^1.9.22",

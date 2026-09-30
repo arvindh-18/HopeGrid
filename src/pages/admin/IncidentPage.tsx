@@ -17,6 +17,7 @@ import { Button, ErrorState, Field, FreshnessLine, LoadingBlock, Notice, Section
 import { api } from '../../data';
 import { usePoll } from '../../hooks/usePoll';
 import { mapsLink } from '../../lib/geo';
+import { publicWebUrl } from '../../lib/serverUrl';
 import { assignmentMessage, whatsappLink } from '../../lib/whatsapp';
 import { NEED_LABEL, PRIORITY_LABEL, TYPE_ICON, TYPE_LABEL } from '../../lib/labels';
 
@@ -199,7 +200,7 @@ export default function IncidentPage() {
                   phone={activeAsg.volunteerPhone}
                   message={assignmentMessage({
                     typeLabel: TYPE_LABEL[d.type], priorityLabel: PRIORITY_LABEL[d.priority], incidentCode: d.code,
-                    area: d.publicArea ?? d.locationText, url: `${window.location.origin}/volunteer/assignments/${activeAsg.id}`,
+                    area: d.publicArea ?? d.locationText, url: `${publicWebUrl()}/volunteer/assignments/${activeAsg.id}`,
                   })}
                 />
                 <Button variant="outline" size="sm" className="self-start" onClick={() => setModal({ cancel: activeAsg.id })}>Cancel assignment</Button>

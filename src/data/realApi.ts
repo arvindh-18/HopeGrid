@@ -1,8 +1,10 @@
 // src/data/realApi.ts — implementation of the Api interface with fetch to /api/* (architecture.md §8).
 // Sends the staff bearer token, parses the error envelope (§8.1) into ApiError, and maps network failures
 // (and the Demo menu's "Simulate offline") to ApiError('NETWORK'). Pages never import this file (AR-12).
+// Requests go to serverUrl(): same site on the web, the configured server in the Android app.
 import { STREAM_RETRY_MAX_MS, STREAM_RETRY_MS } from '../../shared/constants';
 import { ApiError } from '../../shared/types';
+import { serverUrl } from '../lib/serverUrl';
 import { isOnline, subscribeOnline } from '../offline/useOnline';
 import type { Api } from './index';
 import { getToken } from './index';
@@ -18,7 +20,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   if (token) headers.Authorization = `Bearer ${token}`;
   let res: Response;
   try {
-    res = await fetch(`/api${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+    res = await fetch(`${serverUrl()}/api${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   } catch {
     throw new ApiError('NETWORK', OFFLINE_MESSAGE);
   }
@@ -141,7 +143,7 @@ function runStream(method: 'GET' | 'POST', path: string, body: unknown, s: Strea
           if (body !== undefined) headers['Content-Type'] = 'application/json';
           const token = getToken();
           if (token) headers.Authorization = `Bearer ${token}`;
-          const res = await fetch(`/api${path}`, {
+          const res = await fetch(`${serverUrl()}/api${path}`, {
             method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal: controller.signal,
           });
           if (res.status === 401 || res.status === 403 || res.status === 404) break;

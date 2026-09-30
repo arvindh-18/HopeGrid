@@ -8,3 +8,6 @@ models/*
 !models/.gitkeep
 .DS_Store
 eval/results/
+
+# Android app build output (npm run app:apk)
+HopeGrid.apk

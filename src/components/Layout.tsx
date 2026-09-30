@@ -5,6 +5,7 @@ import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { EMERGENCY_NUMBER, api } from '../data';
 import { homeFor, useAuth } from '../hooks/useAuth';
 import { EnglishOnly, LanguagePicker, useI18n, type Key } from '../i18n';
+import { isNativeApp } from '../lib/serverUrl';
 import { isForcedOffline, setForcedOffline, useOnline } from '../offline/useOnline';
 import { IconClose, IconFlask, IconMenu, IconPhone, IconWifiOff } from './Icons';
 import { Toggle, useToast } from './ui';
@@ -98,6 +99,7 @@ function LayoutInner({ variant = 'public', emergency, width = 'narrow', children
         {menuOpen && (
           <nav className="flex flex-col gap-1 border-t border-white/10 px-4 pb-4 pt-2 md:hidden" aria-label="Main">
             {links.map((l) => <NavLink key={l.to} to={l.to} end={l.end} className={linkCls}>{l.label}</NavLink>)}
+            {isNativeApp() && <NavLink to="/app/server" className={linkCls}>{t('nav.server')}</NavLink>}
             {user ? (
               <button type="button" onClick={() => { logout(); navigate('/'); }} className="mt-2 self-start rounded-full bg-white px-4 py-2 text-[14px] font-medium text-ink">Log out {user.name}</button>
             ) : (

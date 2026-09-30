@@ -19,6 +19,8 @@ import AssignmentPage from './pages/volunteer/AssignmentPage';
 import VolunteerHome from './pages/volunteer/VolunteerHome';
 import VolunteerRegister from './pages/VolunteerRegister';
 import Volunteers from './pages/admin/Volunteers';
+import ServerSetup from './pages/ServerSetup';
+import { needsServerSetup } from './lib/serverUrl';
 
 /** Unauthenticated → /login. Wrong role → that user's home. */
 function RequireRole({ role, children }: { role: Role; children: ReactNode }) {
@@ -30,12 +32,11 @@ function RequireRole({ role, children }: { role: Role; children: ReactNode }) {
   return <>{children}</>;
 }
 
-export default function App() {
+/** Android app without a server address: every screen shows the setup first (useLocation re-checks after saving). */
+function AppRoutes() {
+  const location = useLocation();
+  if (needsServerSetup() && location.pathname !== '/app/server') return <ServerSetup firstRun />;
   return (
-    <BrowserRouter>
-      <LanguageProvider>
-      <AuthProvider>
-        <ToastProvider>
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/report" element={<Report />} />
@@ -50,8 +51,19 @@ export default function App() {
             <Route path="/admin/volunteers" element={<RequireRole role="ADMIN"><Volunteers /></RequireRole>} />
             <Route path="/volunteer" element={<RequireRole role="VOLUNTEER"><VolunteerHome /></RequireRole>} />
             <Route path="/volunteer/assignments/:id" element={<RequireRole role="VOLUNTEER"><AssignmentPage /></RequireRole>} />
+            <Route path="/app/server" element={<ServerSetup />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
+  );
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <LanguageProvider>
+      <AuthProvider>
+        <ToastProvider>
+          <AppRoutes />
         </ToastProvider>
       </AuthProvider>
       </LanguageProvider>
