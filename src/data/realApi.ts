@@ -25,6 +25,9 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   const data = await res.json().catch(() => null);
   if (!res.ok) {
     const err = data?.error;
+    // 502–504 without our error envelope comes from a proxy in front of the API (Vite in dev, the Cloudflare tunnel):
+    // the API server itself is stopped or unreachable.
+    if (!err && res.status >= 502 && res.status <= 504) throw new ApiError('NETWORK', OFFLINE_MESSAGE);
     throw new ApiError(err?.code ?? 'SERVER_ERROR', err?.message ?? `The server returned an error (${res.status}).`);
   }
   return data as T;

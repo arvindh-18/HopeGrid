@@ -110,7 +110,7 @@ export default function PublicMap() {
         {feed.loading ? (
           <Skeleton className="h-[60vh]" />
         ) : !feed.data ? (
-          <ErrorState message={feed.error?.message ?? t('map.couldNotLoad')} onRetry={feed.refresh} />
+          <ErrorState message={feed.error ? i.server(feed.error.message) : t('map.couldNotLoad')} onRetry={feed.refresh} />
         ) : (
           <div className="grid gap-4 lg:grid-cols-[1fr_380px]">
             {effectiveView === 'map' && (

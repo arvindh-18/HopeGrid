@@ -182,6 +182,10 @@ Requested: "show reports only up to a certain radius" on the safety map.
 - **Also found while fixing "the map doesn't load":** nothing was wrong in the code. Only a stand-alone Vite dev server
   was running, with no API server behind it, so `/api/public/incidents` answered 502. Start the app with `npm run dev`,
   or `npm run build && npm start`.
+- **Clearer message when the server is down** (`src/data/realApi.ts`): a 502/503/504 with no error details from our
+  server comes from the dev proxy or the tunnel, so it's now reported as "You're offline or the server can't be
+  reached." (translated) instead of "The server returned an error (502)". The map's error box uses the chosen language.
+  Reports are unaffected: they stay queued on the phone and retry, as before.
 
 ## Only you can do these
 
