@@ -760,6 +760,7 @@ describe('Android app access (CORS)', () => {
     expect(pre.status).toBe(204);
     expect(pre.headers['access-control-allow-origin']).toBe('https://localhost');
     expect(pre.headers['access-control-allow-headers']).toContain('Authorization');
+    expect(pre.headers['access-control-allow-headers']).toContain('ngrok-skip-browser-warning'); // sent by the app for ngrok
     const res = await server.call('GET', '/public/incidents', undefined, { headers: { origin: 'https://localhost' } });
     expect(res.status).toBe(200);
     expect(res.headers['access-control-allow-origin']).toBe('https://localhost');

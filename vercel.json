@@ -5,7 +5,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://new-petition-checks-timer.trycloudflare.com/api/:path*"
+      "destination": "https://neuron-reshape-throat.ngrok-free.dev/api/:path*"
     },
     {
       "source": "/((?!api/).*)",

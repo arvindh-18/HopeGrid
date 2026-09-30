@@ -46,6 +46,12 @@ export function setServerUrl(url: string): void {
 /** The app has no server address yet, so it shows the setup screen first. */
 export const needsServerSetup = (): boolean => isNativeApp() && !serverUrl();
 
+/**
+ * Sent with every API request. A free ngrok address shows browser-looking requests (the app, Vercel's forwarding) a
+ * "You are about to visit" page instead of the data, unless this header is present. Other hosts ignore it.
+ */
+export const TUNNEL_HEADERS: Readonly<Record<string, string>> = { 'ngrok-skip-browser-warning': '1' };
+
 /** Address for links other people open in a browser (e.g. the WhatsApp message): the server also serves the website. */
 export function publicWebUrl(): string {
   return serverUrl() || window.location.origin;

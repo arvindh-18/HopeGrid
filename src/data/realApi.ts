@@ -4,7 +4,7 @@
 // Requests go to serverUrl(): same site on the web, the configured server in the Android app.
 import { STREAM_RETRY_MAX_MS, STREAM_RETRY_MS } from '../../shared/constants';
 import { ApiError } from '../../shared/types';
-import { serverUrl } from '../lib/serverUrl';
+import { TUNNEL_HEADERS, serverUrl } from '../lib/serverUrl';
 import { isOnline, subscribeOnline } from '../offline/useOnline';
 import type { Api } from './index';
 import { getToken } from './index';
@@ -14,7 +14,7 @@ const OFFLINE_MESSAGE = "You're offline or the server can't be reached.";
 /** JSON request to /api. */
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   if (!isOnline()) throw new ApiError('NETWORK', OFFLINE_MESSAGE);
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { ...TUNNEL_HEADERS };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -139,7 +139,7 @@ function runStream(method: 'GET' | 'POST', path: string, body: unknown, s: Strea
       if (isOnline()) {
         controller = new AbortController();
         try {
-          const headers: Record<string, string> = { Accept: 'text/event-stream' };
+          const headers: Record<string, string> = { ...TUNNEL_HEADERS, Accept: 'text/event-stream' };
           if (body !== undefined) headers['Content-Type'] = 'application/json';
           const token = getToken();
           if (token) headers.Authorization = `Bearer ${token}`;

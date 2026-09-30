@@ -224,6 +224,27 @@ Requested: turn the website into an app, plus a PDF on how to use it.
 - **Not tested:** a real phone; the camera (photo / ID proof) inside the app; live updates in the app (screens fall
   back to polling if needed); iOS, which needs Xcode (not installed).
 
+## Fixed server address with ngrok (2026-09-30)
+
+- **Settings in `.env`** (documented in `.env.example`; the real values are only in `.env`, never committed):
+  - `PUBLIC_SERVER_URL`: the ngrok static domain
+  - `NGROK_AUTHTOKEN`: optional; empty here, because the token is saved by `ngrok config add-authtoken`
+  - `DEV_MODE=false`, since the server is public
+- **`npm run tunnel:ngrok`** (`server/scripts/tunnel-ngrok.ts`):
+  - runs `ngrok http --url=$PUBLIC_SERVER_URL $PORT`
+  - points `vercel.json` at the same address
+  - checks the server answers through the tunnel
+- **`npm run app:apk`** builds `PUBLIC_SERVER_URL` into the app; it can still be changed under Menu → Server.
+- **The ngrok warning page:** free ngrok addresses show a "You are about to visit" page to browser-looking requests.
+  Every API call now sends `ngrok-skip-browser-warning`, and `server/cors.ts` allows that header from the app; the
+  integration test checks it.
+- **Checked (2026-09-30):**
+  - 102 tests pass
+  - the rotated Supabase keys work
+  - `volunteer_applications` exists
+  - the APK contains the address and no Supabase keys
+- **Not yet checked through the live tunnel:** it needs the ngrok token saved on this Mac.
+
 ## Only you can do these
 
 - **Rotate the Supabase keys.**

@@ -11,7 +11,7 @@ export function appCors(req: Request, res: Response, next: NextFunction): void {
   if (origin && APP_ORIGINS.has(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Vary', 'Origin');
-    res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, Accept');
+    res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, Accept, ngrok-skip-browser-warning');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
     res.setHeader('Access-Control-Max-Age', '600');
     if (req.method === 'OPTIONS') {

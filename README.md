@@ -47,6 +47,12 @@ Android app: the same app packaged with Capacitor 6 (`android/`, `capacitor.conf
 needs no new build. The server allows the app's origin (`server/cors.ts`). iOS needs Xcode and is not set up.
 Step-by-step guide: `HopeGrid-App-Guide.pdf` (next to the repo folder).
 
+Fixed address with ngrok: set `PUBLIC_SERVER_URL` (your ngrok static domain) in `.env`, save your token once with
+`ngrok config add-authtoken <token>`, then run `npm start` and `npm run tunnel:ngrok` (keep both open). The tunnel
+command keeps `vercel.json` on that address and checks the server answers. `npm run app:apk` builds the address into
+the Android app. Every API request sends `ngrok-skip-browser-warning`, so ngrok's free-plan warning page never
+replaces the data.
+
 Website on Vercel, server on this laptop: `vercel.json` makes Vercel serve the pages and forward `/api/*` to the
 laptop. Run `npm start`, then `npm run tunnel:vercel` (keep both open). It starts a Cloudflare quick tunnel and writes
 its address into `vercel.json`; commit and push that file so Vercel redeploys. The quick-tunnel address changes each
