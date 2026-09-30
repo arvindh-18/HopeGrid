@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { keywordExtractor } from '../shared/keywordExtractor';
+import { chooseType, keywordExtractor } from '../shared/keywordExtractor';
 import { computeConfidence, computeEscalation, computePriority, confidenceBand } from '../shared/scoring';
 import { compatibleTypes, findDuplicate, findRelated, mergeFields, type LinkIncident, type MergeableIncident } from '../shared/linking';
 import { rankVolunteers, type MatchVolunteer } from '../shared/volunteerMatch';
@@ -49,6 +49,17 @@ describe('BR-10 keyword extractor', () => {
     expect(keywordExtractor('ghar mein aag lagi hai, 3 log andar hain').people).toBe(3);
     expect(keywordExtractor('आगे सड़क बंद है').type).toBe('ROAD_BLOCKED'); // आगे ("ahead") is not आग ("fire")
     expect(keywordExtractor('बाढ़'.normalize('NFD')).type).toBe('FLOOD'); // nukta typed as a separate mark
+  });
+});
+
+describe('BR-11a incident type: keyword rules first, then the AI', () => {
+  it('uses the keyword type when the keyword rules find one', () => {
+    expect(chooseType('HEAVY_RAIN', 'POWER_OUTAGE')).toBe('POWER_OUTAGE');
+    expect(chooseType('HEAVY_RAIN', keywordExtractor('No electricity in our street since morning').type)).toBe('POWER_OUTAGE');
+  });
+  it("keeps the AI's type when the keyword rules find nothing", () => {
+    expect(keywordExtractor('My mother has high fever and cannot breathe properly').type).toBe('OTHER');
+    expect(chooseType('MEDICAL', 'OTHER')).toBe('MEDICAL');
   });
 });
 
@@ -165,9 +176,20 @@ describe('BR-80 public view', () => {
     code: 'ABCDE', type: 'FLOOD' as const, status: 'NEW' as const, lat: 13.04051234, lng: 80.23371234, publicArea: 'Central Street',
     verifiedAt: null, resolvedAt: null, confidence: 45, effectivePriority: 'CRITICAL' as const, reportCount: 1, updatedAt: minsAgo(1),
   };
-  it('hides low-confidence NEW incidents', () => {
+  it('hides every NEW incident until a coordinator acts on it, whatever its confidence', () => {
     expect(isPublic(src, now)).toBe(false);
-    expect(isPublic({ ...src, confidence: 60 }, now)).toBe(true);
+    expect(isPublic({ ...src, confidence: 99, reportCount: 5 }, now)).toBe(false);
+    expect(isPublic({ ...src, status: 'VERIFIED', verifiedAt: minsAgo(1) }, now)).toBe(true);
+    expect(isPublic({ ...src, status: 'IN_PROGRESS' }, now)).toBe(true); // a volunteer was sent: a coordinator acted
+  });
+  it('shows RESOLVED incidents only for a few hours, and never REJECTED or MERGED ones', () => {
+    expect(isPublic({ ...src, status: 'RESOLVED', resolvedAt: minsAgo(60) }, now)).toBe(true);
+    expect(isPublic({ ...src, status: 'RESOLVED', resolvedAt: minsAgo(7 * 60) }, now)).toBe(false);
+    expect(isPublic({ ...src, status: 'REJECTED', verifiedAt: minsAgo(5) }, now)).toBe(false);
+    expect(isPublic({ ...src, status: 'MERGED', verifiedAt: minsAgo(5) }, now)).toBe(false);
+  });
+  it('never shows an incident without coordinates', () => {
+    expect(isPublic({ ...src, status: 'VERIFIED', lat: null, lng: null }, now)).toBe(false);
   });
   it('never leaks area before verification and rounds coordinates', () => {
     const p = toPublicIncident({ ...src, confidence: 60 });

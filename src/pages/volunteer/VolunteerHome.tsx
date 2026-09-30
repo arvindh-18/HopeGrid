@@ -25,7 +25,7 @@ export default function VolunteerHome() {
   const toast = useToast();
   const navigate = useNavigate();
   const profile = usePoll(() => api.getMyProfile(), POLL_VOLUNTEER_MS);
-  const asg = usePoll(() => api.listMyAssignments(), POLL_VOLUNTEER_MS);
+  const asg = usePoll(() => api.listMyAssignments(), POLL_VOLUNTEER_MS, [], true, (onChange, onLive) => api.watchVolunteer(onChange, onLive));
   const [declining, setDeclining] = useState<VolunteerAssignment | null>(null);
   const [editingSkills, setEditingSkills] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);

@@ -46,6 +46,11 @@ export interface Api {
   sendVolunteerMessage(id: string, reportId: string, msg: OutgoingMessage): Promise<ChatMessage>;
   // Dev
   resetDemo(): Promise<{ ok: true }>;
+  // Live change signals (Server-Sent Events, architecture D12). Each returns an unsubscribe function. `onLive`
+  // reports whether the stream is connected; screens poll less while it is.
+  watchAdmin(onChange: (incidentId: string | null) => void, onLive?: (live: boolean) => void): () => void;
+  watchVolunteer(onChange: () => void, onLive?: (live: boolean) => void): () => void;
+  watchTrack(code: string, pin: string, onChange: () => void, onLive?: (live: boolean) => void): () => void;
 }
 
 export const EMERGENCY_NUMBER: string = import.meta.env.VITE_EMERGENCY_NUMBER || '112';

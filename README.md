@@ -4,22 +4,27 @@ Hyperlocal disaster preparedness and community response platform: offline-first 
 
 Specs: `docs/architecture.md`, `docs/features.md`, `docs/rules.md`, `docs/DESIGN.md`.
 
+Evidence and context: [problem](docs/problem.md) · [comparison with other tools](docs/comparison.md) ·
+[impact and deployment](docs/impact-and-deployment.md) · [verification (tests)](docs/verification.md) ·
+[AI evaluation](docs/evaluation.md) · [scaling and resilience](docs/scaling.md)
+
 ## Current state
 
 | Part | State |
 |---|---|
 | Frontend (`src/`) | All screens S01–S11, connected to the real API through `src/data/realApi.ts` |
-| Shared rules (`shared/`) | Implemented and tested (22 tests) |
+| Shared rules (`shared/`) | Implemented and unit-tested (28 tests) |
+| API + pipeline | 55 integration tests with Supabase, the LLM and Whisper stubbed (`tests/integration/`) |
 | Backend (`server/`, `supabase/`) | All API routes in architecture.md §8, report pipeline (Whisper → local LLM → keyword fallback, all running inside the server), seed + demo reset |
 
-Details and assumptions from the UI phase: `UI_SKELETON_STATUS.md`.
+`UI_SKELETON_STATUS.md` is a historical note from the UI phase and is out of date.
 
 ## Run
 
 ```bash
 npm install
 npm run dev        # web on http://localhost:5173 + API server on http://localhost:3000
-npm test           # business-rule tests
+npm test           # business-rule unit tests + API integration tests (no .env or models needed)
 npm run build      # typecheck + production build + service worker
 npm run preview    # serve the production build
 npm start          # API server serving the production build (dist/)
@@ -38,7 +43,16 @@ First-time setup:
 
 Demo on phones: `npm run build && npm start`, then `npm run tunnel` in a second terminal and open the printed `https://…trycloudflare.com` link (HTTPS is needed for GPS and the microphone).
 
-In dev builds, the lime **Demo** button can reset demo data (`/api/dev/reset`) or simulate offline.
+In dev builds, the lime **Demo** button can reset demo data (`/api/dev/reset`, only from the server laptop itself) or simulate offline.
+
+Languages: the victim screens (home, report, tracking, map, chat) are in English, தமிழ் and हिन्दी, chosen with the
+picker in the header and remembered per phone. Coordinator and volunteer screens are English only.
+
+Other scripts: `npm run eval` (AI accuracy on synthetic reports; add `-- --data heldout` for the held-out set),
+`npm run bench` (model latency), `npm run cleanup` (retention: dry run unless `-- --apply`).
+
+Live updates: coordinator, volunteer and tracking screens get a live "something changed" signal (Server-Sent
+Events) and refresh at once. While it is connected they poll only every 30 s; without it they poll as before.
 
 Seeded staff accounts (architecture.md §12, created by the server seed script): `admin@demo.app`, `ravi@demo.app`, password `Demo@123`.
 
@@ -62,3 +76,13 @@ hopegrid/
 ## How the frontend reaches the backend
 
 Pages only call `src/data/index.ts` (`api`), which is backed by `src/data/realApi.ts` (fetch to `/api/*`). In development, Vite proxies `/api` to `http://localhost:3000`. In demo mode, `npm start` serves both the API and the built app from port 3000.
+
+## Honest scope
+
+| | What |
+|---|---|
+| **Real and tested** | Offline report outbox; report API with idempotent resend; local speech-to-text (Whisper) with English translation; local AI structuring (Qwen 2.5 3B) with keyword fallback, and the keyword type used when the rules find one (BR-11a); confidence and priority with reasons; duplicate flags (never auto-merged); volunteer matching; assignment workflow; private chat; public map limited to coordinator-verified incidents; Tamil/Hindi victim screens; retrying processing queue; live change signals (SSE) with polling fallback; retention clean-up script. See `docs/verification.md`. |
+| **Simulated** | Phone verification: no SMS is sent, the code is always `123456`. Escalation to emergency services: only a log line, no external call. Seeded demo staff and incidents. |
+| **Measured but modest** | On synthetic reports the incident type is right 70% of the time (both sets); all fields right for only about a quarter of reports; Tamil is weak. See `docs/evaluation.md`. |
+| **Simulated → manual** | WhatsApp alert to a volunteer: a "Send on WhatsApp" button prepares the message; the coordinator presses Send (automatic sending via the WhatsApp Business API is roadmap). |
+| **Not built (roadmap)** | SMS channel for feature phones; automatic WhatsApp notifications; rate limiting on the public endpoints; more than one server (live signals are in-process); a native-speaker review of the translations; testing with real users; a licence file. |

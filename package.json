@@ -15,9 +15,12 @@
     "tunnel": "cloudflared tunnel --url http://localhost:3000",
     "preview": "vite preview",
     "seed": "tsx server/scripts/seed.ts",
-    "typecheck": "tsc --noEmit && tsc --noEmit --strict --target es2022 --module esnext --moduleResolution bundler --skipLibCheck --types node server/index.ts",
+    "typecheck": "tsc --noEmit && tsc --noEmit --strict --target es2022 --module esnext --moduleResolution bundler --skipLibCheck --types node server/index.ts server/scripts/cleanup.ts eval/run.ts eval/bench.ts eval/prompt-experiment.ts eval/diagnose-type-bias.ts",
     "test": "vitest run",
-    "setup-ai": "tsx server/scripts/setup-models.ts"
+    "setup-ai": "tsx server/scripts/setup-models.ts",
+    "eval": "tsx eval/run.ts",
+    "bench": "tsx eval/bench.ts",
+    "cleanup": "tsx server/scripts/cleanup.ts"
   },
   "dependencies": {
     "@ffmpeg-installer/ffmpeg": "^1.1.0",

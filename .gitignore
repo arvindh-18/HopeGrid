@@ -7,3 +7,4 @@ tmp/
 models/*
 !models/.gitkeep
 .DS_Store
+eval/results/

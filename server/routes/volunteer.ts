@@ -10,6 +10,7 @@ import { humanize } from '../../shared/volunteerMatch';
 import { currentUser, loadProfile, requireRole } from '../auth';
 import { fromRows, toRow } from '../mappers';
 import { addLog, endAssignment, getIncident, recomputeIncident, releaseVolunteer, reportsOf, updateIncident } from '../pipeline';
+import { openStream } from '../events';
 import { db } from '../supabase';
 import { ownAssignment } from './messages';
 
@@ -52,6 +53,25 @@ async function toVolunteerAssignment(a: AssignmentRecord, i?: IncidentRecord): P
     reporters: reports.map((r, n) => ({ reportId: r.id, label: `Reporter ${n + 1}` })),
   };
 }
+
+// GET /api/volunteer/events — Server-Sent Events for the incidents this volunteer is assigned to, and no others.
+volunteerRouter.get('/events', async (req, res) => {
+  const user = currentUser(req);
+  const mine = new Set<string>();
+  const reload = async () => {
+    const { data, error } = await db.from('assignments').select('incident_id').eq('volunteer_id', user.id);
+    if (error) return; // keep the last known set
+    mine.clear();
+    for (const a of data) mine.add(a.incident_id);
+  };
+  await reload();
+  openStream(res, (c) => {
+    if (c.volunteerId === user.id) mine.add(c.incidentId);
+    if (!mine.has(c.incidentId)) return null;
+    void reload(); // a merge may have moved the assignment to another incident
+    return { incidentId: c.incidentId };
+  });
+});
 
 // GET /api/volunteer/me
 volunteerRouter.get('/me', async (req, res) => {

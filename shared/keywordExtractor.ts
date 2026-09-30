@@ -82,6 +82,15 @@ function parsePlaces(original: string): string[] {
   return out.slice(0, 5);
 }
 
+/**
+ * BR-11a — the incident type used when the AI answered: the keyword rules' type when they find one, otherwise the
+ * AI's. Measured on synthetic reports (docs/evaluation.md §3): the keyword rules are usually right when they fire,
+ * while the local AI over-uses HEAVY_RAIN. Type accuracy 55% → 70% on the held-out set; no other field is affected.
+ */
+export function chooseType(aiType: IncidentType, keywordType: IncidentType): IncidentType {
+  return keywordType !== 'OTHER' ? keywordType : aiType;
+}
+
 export function keywordExtractor(text: string): Extraction {
   const t = norm(text);
 

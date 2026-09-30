@@ -1,16 +1,17 @@
 # TODO — open items for the owner
 
 Items still open from the build sessions (up to 2026-09-29). Tick each box when done.
-Background for every item is in [`PROJECT.md`](PROJECT.md).
+Background for every item is in `PROJECT.md` (kept in ~/Downloads) and in `CHANGES.md` for the score-raising pass.
 
 ---
 
 ## 🔴 Do first (before committing or demoing)
 
 ### Git
-- [ ] **Commit the current work.** Local `main` has a merge commit (`test` → `main`) plus uncommitted work: languages,
-      Hindi keywords, voice translation, `PROJECT.md`, `TODO.md`.
-      `git add -A` → `git commit -m "..."` → `git push origin main`
+- [ ] **Review and commit the score-raising pass** (see `CHANGES.md`): security fixes, 48 API tests, the AI
+      evaluation, the processing queue, the clean-up script and the new docs. Nothing has been committed.
+- [ ] **Rotate both Supabase keys now** (Project Settings → API Keys). The real keys are in the public git history
+      (commits `962d3d2`, `6ccb65a`, `0197709`) even though `.env.example` now has placeholders. Then update `.env`.
 - [ ] **Remove the `.DS_Store` files from git.** They were committed in "Backend and AI". `.gitignore` now excludes them,
       but they stay tracked until removed:
       `git rm --cached .DS_Store server/.DS_Store src/.DS_Store`
@@ -32,6 +33,15 @@ Background for every item is in [`PROJECT.md`](PROJECT.md).
 
 ---
 
+## 🟠 For the judges (only you can do these)
+- [ ] **Fill in the hackathon track** in `docs/problem.md` (top of the file).
+- [ ] **Run one tabletop exercise with real people** (plan and feedback template in `docs/impact-and-deployment.md`
+      §6–7) and fill in the **[TO FILL]** rows. This is the biggest missing piece of evidence.
+- [ ] **Record a demo video** and link it in `docs/impact-and-deployment.md` §8.
+- [ ] **Choose a licence** (e.g. MIT or AGPL-3.0) and add a `LICENSE` file. `docs/comparison.md` currently says "no licence
+      file yet".
+- [ ] Approach one candidate partner (DDMA, NGO or college NSS unit) and record the outcome, not the plan.
+
 ## 🟠 Before the demo
 
 ### Languages (F25)
@@ -45,11 +55,28 @@ Background for every item is in [`PROJECT.md`](PROJECT.md).
 - [ ] Decide what to say in the pitch about typed Tamil/Hindi: the 3B AI is weaker there; the form choices and
       keywords compensate.
 
+### WhatsApp button
+- [ ] Put your teammates' **real** phone numbers on the volunteer profiles in Supabase (Table Editor → `profiles` → `phone`,
+      e.g. `+919840012345`). Seeded volunteers have none, so the button says "No phone number".
+- [ ] Try it once: assign a volunteer → **Send on WhatsApp** → WhatsApp opens with the message → Send.
+
 ### Demo run-through
 - [ ] Full demo script from `docs/features.md` §4 on the real demo laptop + 2 phones via `npm run tunnel` (HTTPS link).
 - [ ] Backup check: `AI_MODEL=none npm start` → reports still become incidents, labelled "Keywords".
 - [ ] Record a backup video of the full run.
 - [ ] Laptop: plugged in, sleep off, phone hotspot ready as a backup internet connection.
+
+### Checks that still need a real device or service
+- [ ] **Record a voice note on an iPhone (Safari)** and submit it. The new upload check accepts MP4 by its "ftyp" header;
+      it was verified with Chrome's real recordings, but not with Safari.
+- [ ] **Try `/api/dev/reset` through a real `npm run tunnel` link** and confirm it answers 403 (tested with the headers a
+      tunnel adds, not with a live tunnel).
+- [ ] **Check live updates through a real tunnel:** open the coordinator dashboard and a tracking page on two phones via
+      `npm run tunnel`, change the incident, and confirm both update within a second. If the tunnel buffers the
+      streams, the screens fall back to normal polling.
+- [ ] Decide whether to add **rate limiting** after all: without it, the 4-digit tracking PIN can be guessed by repeated
+      requests (docs/scaling.md, PROJECT.md §15).
+- [ ] Prefer a **16 GB laptop** for the server: with 8 GB the models caused heavy swapping in testing.
 
 ### Guides and docs
 - [ ] **Regenerate the Feature Guide PDF** (`../HopeGrid-Feature-Guide.pdf`). It doesn't include F25 languages or the
@@ -79,7 +106,8 @@ Background for every item is in [`PROJECT.md`](PROJECT.md).
 
 ### Features and quality ideas
 - [ ] More languages: Telugu, Kannada, Malayalam, Bengali, Marathi… Copy `src/i18n/hi.ts`, add keywords + tests.
-      Whisper-small already handles speech in about 13 Indian languages; **Odia is not supported**.
+      Whisper's language list includes 14 languages used in India (not Odia, Kashmiri, Konkani, Maithili, Manipuri,
+      Santali or Dogri); being in the list doesn't mean good accuracy with the small model — measure first.
 - [ ] Safety net for AI misses: let keyword flags from the original text (trapped, vulnerable, medical) *raise* the AI's
       flags, never lower them. Needs a rules change in `docs/rules.md`.
 - [ ] Better AI for Indian languages if the server laptop has 16 GB RAM: `AI_MODEL=hf:Qwen/Qwen2.5-7B-Instruct-GGUF:Q4_K_M` (~4.7 GB).

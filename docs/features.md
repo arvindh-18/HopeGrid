@@ -81,7 +81,7 @@
 **Behaviour:**
 1. S04 form: code (6 chars, auto-uppercase) + PIN (4 digits). If opened with `?r=<reportId>` and that report is in the outbox, fill both automatically and load.
 2. Shows a vertical stepper of `VictimStep` values in order RECEIVED → REVIEWING → VERIFIED → HELP_ASSIGNED → ON_THE_WAY → ARRIVED → RESOLVED; current step highlighted (BR-90). If CLOSED, show only the closed message (BR-91).
-3. Shows public log messages (newest first) and "Last updated X min ago". Polls every `POLL_TRACK_MS`.
+3. Shows public log messages (newest first) and "Last updated X min ago". Polls every `POLL_TRACK_MS`, and refreshes at once on a live change signal (architecture D12).
 4. Wrong code or PIN → "Code or PIN not found. Check and try again."
 5. If the report is still only in the outbox (not sent), show "This report hasn't been sent yet" with a Retry button.
 6. Emergency banner visible.
@@ -148,7 +148,7 @@
 1. Counter cards 🔴 Critical, 🟠 High, 🟡 Medium, 🟢 Low (counts of ACTIVE_STATUSES by effective priority).
 2. Filters: status (All active / NEW / VERIFIED / IN_PROGRESS / RESOLVED / REJECTED), type.
 3. Queue sorted per BR-120. Row: priority badge, code, type icon + label, location text, people, confidence %, status badge, report count, age ("12 min ago"), tags: `Possible duplicate of #X`, `Reassign`, `Ready to resolve`, `Escalation recommended`, `Escalated`, `🎤`.
-4. Row click → S08. Polls every `POLL_ADMIN_MS`.
+4. Row click → S08. Polls every `POLL_ADMIN_MS`, and refreshes at once on a live change signal (architecture D12).
 **Acceptance:**
 - [ ] A new report appears within one poll interval after processing.
 
@@ -171,9 +171,10 @@
 
 ### F14 — Volunteer suggestions & assignment
 **Goal:** admin picks the right volunteer quickly; system only suggests.
-**Behaviour:** suggestions per BR-60…BR-63 shown when the incident has no active assignment and status ∈ {NEW, VERIFIED}. Each card: name, score, distance, reasons ("✓ Swimming", "✓ Life jacket", "1.2 km away"), missing ("✗ Boat"). Button **Assign** → confirm modal (if incident NEW: "This incident is not verified yet. The volunteer may be going to check it.") → assignment ASSIGNED (BR-103). "Cancel assignment" button on an active assignment.
+**Behaviour:** suggestions per BR-60…BR-63 shown when the incident has no active assignment and status ∈ {NEW, VERIFIED}. Each card: name, score, distance, reasons ("✓ Swimming", "✓ Life jacket", "1.2 km away"), missing ("✗ Boat"). Button **Assign** → confirm modal (if incident NEW: "This incident is not verified yet. The volunteer may be going to check it.") → assignment ASSIGNED (BR-103). "Cancel assignment" button on an active assignment. **Send on WhatsApp** (added 2026-09-30): on an active assignment, a button opens WhatsApp on the coordinator's device with the volunteer's number and a ready message (incident type, priority, code, area, link to the volunteer's assignment page); the coordinator presses Send. It uses a `wa.me` link, so there's no API, account or cost. The message never contains the victim's name, phone or report text. Hidden when the volunteer has no phone number (`src/lib/whatsapp.ts`).
 **Acceptance:**
 - [ ] Demo: Ravi is ranked first for the flood incident.
+- [ ] After assigning, "Send on WhatsApp" opens WhatsApp with the volunteer's number and the message (needs a phone number on the volunteer's profile).
 - [ ] BUSY volunteers and volunteers who declined this incident never appear.
 
 ### F15 — Volunteer assignment workflow
@@ -200,7 +201,7 @@
 5. Quick replies — victim: "📍 Share my location", "We are on the 2nd floor", "Water is rising", "Someone needs medical help", "Please hurry". Volunteer: "I'm 5 minutes away", "Stay where you are", "Wave a cloth or torch from the window", "Can you reach the roof?", "I've arrived — where are you?".
 6. "Share my location" gets GPS and sends a message with lat/lng; volunteer sees "📍 Location shared — Open in Maps".
 7. Voice messages: small mic in ChatBox using `VoiceRecorder` (max 60 s).
-8. Chat polls every `POLL_CHAT_MS`; on a new incoming message the page vibrates (`navigator.vibrate(200)`) and plays a short beep.
+8. Chat polls every `POLL_CHAT_MS` (and refreshes on a live change signal, architecture D12); on a new incoming message the page vibrates (`navigator.vibrate(200)`) and plays a short beep.
 9. When closed: history visible, input replaced by "Chat closed".
 10. Offline: sending shows "You're offline — message not sent" and keeps the typed text.
 **Acceptance:**

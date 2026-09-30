@@ -1,7 +1,7 @@
 // S08 Incident page — everything the coordinator needs to decide and act (features.md F13–F16, F18, F21).
 import { useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { POLL_ADMIN_MS } from '../../../shared/constants';
+import { POLL_ADMIN_MS, POLL_RESOURCE_PICKER_MS } from '../../../shared/constants';
 import { formatDistance } from '../../../shared/linking';
 import {
   ACTIVE_ASSIGNMENT, ACTIVE_STATUSES, ApiError, INCIDENT_TYPES, NEEDS, PRIORITY_LEVELS,
@@ -17,6 +17,7 @@ import { Button, ErrorState, Field, FreshnessLine, LoadingBlock, Notice, Section
 import { api } from '../../data';
 import { usePoll } from '../../hooks/usePoll';
 import { mapsLink } from '../../lib/geo';
+import { assignmentMessage, whatsappLink } from '../../lib/whatsapp';
 import { NEED_LABEL, PRIORITY_LABEL, TYPE_ICON, TYPE_LABEL } from '../../lib/labels';
 
 type ModalKind =
@@ -27,7 +28,9 @@ export default function IncidentPage() {
   const { id = '' } = useParams();
   const navigate = useNavigate();
   const toast = useToast();
-  const q = usePoll(() => api.getIncident(id), POLL_ADMIN_MS, [id]);
+  // Live: refresh when this incident changes (other changes, e.g. volunteer availability, arrive with the fallback poll).
+  const q = usePoll(() => api.getIncident(id), POLL_ADMIN_MS, [id], true,
+    (onChange, onLive) => api.watchAdmin((changed) => { if (!changed || changed === id) onChange(); }, onLive));
   const [modal, setModal] = useState<ModalKind>(null);
   const [busy, setBusy] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
@@ -192,6 +195,13 @@ export default function IncidentPage() {
                   </div>
                   <AssignmentBadge status={activeAsg.status} />
                 </div>
+                <WhatsAppButton
+                  phone={activeAsg.volunteerPhone}
+                  message={assignmentMessage({
+                    typeLabel: TYPE_LABEL[d.type], priorityLabel: PRIORITY_LABEL[d.priority], incidentCode: d.code,
+                    area: d.publicArea ?? d.locationText, url: `${window.location.origin}/volunteer/assignments/${activeAsg.id}`,
+                  })}
+                />
                 <Button variant="outline" size="sm" className="self-start" onClick={() => setModal({ cancel: activeAsg.id })}>Cancel assignment</Button>
               </div>
             ) : canAssign ? (
@@ -515,7 +525,7 @@ function MergeModal({ d, onConfirm, ...m }: BaseModal & { d: IncidentDetail; onC
 }
 
 function AllocateModal({ onConfirm, ...m }: BaseModal & { onConfirm: (resourceId: string, qty: number) => void }) {
-  const res = usePoll<Resource[]>(() => api.listResources(), 60_000, [m.open], m.open);
+  const res = usePoll<Resource[]>(() => api.listResources(), POLL_RESOURCE_PICKER_MS, [m.open], m.open);
   const [rid, setRid] = useState('');
   const [qty, setQty] = useState('1');
   const chosen = res.data?.find((r) => r.id === rid);
@@ -541,5 +551,16 @@ function AllocateModal({ onConfirm, ...m }: BaseModal & { onConfirm: (resourceId
       )}
       <ModalError error={m.error} />
     </Modal>
+  );
+}
+
+/** F14: opens WhatsApp on this device with the volunteer's number and a ready message; the coordinator presses Send. */
+function WhatsAppButton({ phone, message }: { phone: string | null; message: string }) {
+  const link = whatsappLink(phone, message);
+  if (!link) return <p className="t-caption">No phone number on this volunteer's profile, so WhatsApp can't be used.</p>;
+  return (
+    <a href={link} target="_blank" rel="noreferrer" className="btn btn-sm self-start bg-[#25d366] text-ink no-underline hover:bg-[#1ebe5b]">
+      <IconPhone size={16} /> Send on WhatsApp
+    </a>
   );
 }

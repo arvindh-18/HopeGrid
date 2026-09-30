@@ -213,7 +213,7 @@ export interface IncidentDetail extends IncidentListItem {
   possibleDuplicate: { id: string; code: string; type: IncidentType; summary: string | null; distanceM: number | null } | null;
   related: { id: string; code: string; type: IncidentType; text: string }[];
   suggestions: VolunteerSuggestion[];
-  assignments: { id: string; volunteerId: string; volunteerName: string; status: AssignmentStatus; reason: string | null; updatedAt: string }[];
+  assignments: { id: string; volunteerId: string; volunteerName: string; volunteerPhone: string | null; status: AssignmentStatus; reason: string | null; updatedAt: string }[]; // staff-only view
   allocations: { id: string; resourceName: string; quantity: number; unit: string; createdAt: string }[];
   logs: { at: string; text: string; public: boolean }[];
   chats: ChatThread[];

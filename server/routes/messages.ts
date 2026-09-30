@@ -10,9 +10,10 @@ import {
 import { currentUser, requireRole } from '../auth';
 import { fromRow, fromRows, toRow } from '../mappers';
 import { assignmentsOf, isUuid, reportsOf } from '../pipeline';
+import { emitChange } from '../events';
 import { signedUrls, uploadBase64 } from '../storage';
 import { db } from '../supabase';
-import { AUDIO_EXT_RE, victimReport } from './victim';
+import { AUDIO_EXT_RE, isAudioBase64, victimReport } from './victim';
 
 export const messagesRouter = Router();
 
@@ -48,6 +49,7 @@ async function createMessage(
   if (!text && !hasAudio && !hasLocation) throw new ApiError('VALIDATION', 'Type a message first.');
   if (hasAudio && msg.audioBase64!.length > MAX_AUDIO_BASE64) throw new ApiError('VALIDATION', 'Voice message is too long.');
   if (hasAudio && !AUDIO_EXT_RE.test(msg.audioMime ?? '')) throw new ApiError('VALIDATION', 'Voice message format is not supported.');
+  if (hasAudio && !isAudioBase64(msg.audioBase64!, msg.audioMime!)) throw new ApiError('VALIDATION', 'Voice message is not a valid recording.');
 
   const id = randomUUID();
   let audioPath: string | null = null;
@@ -64,6 +66,7 @@ async function createMessage(
   };
   const { data, error } = await db.from('messages').insert(toRow(record)).select('*').single();
   if (error) throw new Error(`Message insert failed: ${error.message}`);
+  emitChange({ incidentId: base.incidentId, reportId: base.reportId });
   return (await toChatMessages([fromRow<MessageRecord>(data)]))[0];
 }
 

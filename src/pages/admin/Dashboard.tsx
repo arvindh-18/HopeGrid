@@ -30,7 +30,7 @@ const COUNTER_DOT: Record<string, string> = { CRITICAL: 'bg-white', HIGH: 'bg-[#
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const q = usePoll(() => api.listIncidents(), POLL_ADMIN_MS);
+  const q = usePoll(() => api.listIncidents(), POLL_ADMIN_MS, [], true, (onChange, onLive) => api.watchAdmin(() => onChange(), onLive));
   const [status, setStatus] = useState<StatusFilter>('ACTIVE');
   const [type, setType] = useState<IncidentType | 'ALL'>('ALL');
   const [search, setSearch] = useState('');

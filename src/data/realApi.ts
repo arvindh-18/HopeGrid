@@ -1,8 +1,9 @@
 // src/data/realApi.ts — implementation of the Api interface with fetch to /api/* (architecture.md §8).
 // Sends the staff bearer token, parses the error envelope (§8.1) into ApiError, and maps network failures
 // (and the Demo menu's "Simulate offline") to ApiError('NETWORK'). Pages never import this file (AR-12).
+import { STREAM_RETRY_MAX_MS, STREAM_RETRY_MS } from '../../shared/constants';
 import { ApiError } from '../../shared/types';
-import { isOnline } from '../offline/useOnline';
+import { isOnline, subscribeOnline } from '../offline/useOnline';
 import type { Api } from './index';
 import { getToken } from './index';
 
@@ -72,4 +73,105 @@ export const realApi: Api = {
   sendVolunteerMessage: (assignmentId, reportId, msg) => post(`/volunteer/assignments/${id(assignmentId)}/chat`, { reportId, ...msg }),
   // Dev
   resetDemo: () => post('/dev/reset'),
+  // Live change signals
+  watchAdmin: (onChange, onLive) => watch('GET', '/admin/events', undefined, {
+    onChange: (d) => onChange(typeof d.incidentId === 'string' ? d.incidentId : null), onLive,
+  }),
+  watchVolunteer: (onChange, onLive) => watch('GET', '/volunteer/events', undefined, { onChange: () => onChange(), onLive }),
+  watchTrack: (code, pin, onChange, onLive) => watch('POST', '/track/events', { code, pin }, { onChange: () => onChange(), onLive }),
 };
+
+// ---------- Live change signals (architecture D12) ----------
+// Server-Sent Events read with fetch(), because EventSource can't send the Authorization header or a POST body.
+// Subscribers of the same endpoint share one stream. It reconnects with a growing delay, and gives up for good on
+// 401/403/404 (the screen then simply keeps polling). A stream counts as live only once bytes arrive, so a proxy
+// that buffers it leaves the screen polling at its normal speed.
+interface Listener { onChange: (data: Record<string, unknown>) => void; onLive?: (live: boolean) => void }
+interface Stream { listeners: Set<Listener>; live: boolean; stop: () => void }
+const streams = new Map<string, Stream>();
+
+function watch(method: 'GET' | 'POST', path: string, body: unknown, listener: Listener): () => void {
+  const key = `${method} ${path} ${JSON.stringify(body ?? null)}`;
+  let stream = streams.get(key);
+  if (!stream) {
+    const created: Stream = { listeners: new Set(), live: false, stop: () => {} };
+    created.stop = runStream(method, path, body, created);
+    streams.set(key, created);
+    stream = created;
+  }
+  const s = stream;
+  s.listeners.add(listener);
+  listener.onLive?.(s.live);
+  return () => {
+    s.listeners.delete(listener);
+    if (s.listeners.size === 0) {
+      s.stop();
+      streams.delete(key);
+    }
+  };
+}
+
+function runStream(method: 'GET' | 'POST', path: string, body: unknown, s: Stream): () => void {
+  let stopped = false;
+  let controller: AbortController | null = null;
+  const setLive = (live: boolean) => {
+    if (s.live === live) return;
+    s.live = live;
+    s.listeners.forEach((l) => l.onLive?.(live));
+  };
+  // Going offline (or the Demo menu's "Simulate offline") drops the stream; the loop reconnects when back online.
+  const unsubscribeOnline = subscribeOnline(() => { if (!isOnline()) controller?.abort(); });
+
+  void (async () => {
+    let delay = STREAM_RETRY_MS;
+    while (!stopped) {
+      if (isOnline()) {
+        controller = new AbortController();
+        try {
+          const headers: Record<string, string> = { Accept: 'text/event-stream' };
+          if (body !== undefined) headers['Content-Type'] = 'application/json';
+          const token = getToken();
+          if (token) headers.Authorization = `Bearer ${token}`;
+          const res = await fetch(`/api${path}`, {
+            method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal: controller.signal,
+          });
+          if (res.status === 401 || res.status === 403 || res.status === 404) break;
+          if (!res.ok || !res.body) throw new Error(`Stream answered ${res.status}`);
+          const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+          let buffer = '';
+          for (;;) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            setLive(true);
+            delay = STREAM_RETRY_MS;
+            buffer += value;
+            let end: number;
+            while ((end = buffer.indexOf('\n\n')) >= 0) {
+              const lines = buffer.slice(0, end).split('\n');
+              buffer = buffer.slice(end + 2);
+              if (!lines.includes('event: change')) continue; // ": connected" / ": ping" comments
+              let data: Record<string, unknown> = {};
+              try {
+                const line = lines.find((l) => l.startsWith('data: '));
+                if (line) data = JSON.parse(line.slice(6));
+              } catch { /* an unreadable payload still means "something changed" */ }
+              s.listeners.forEach((l) => l.onChange(data));
+            }
+          }
+        } catch { /* network error, or stopped */ }
+      }
+      setLive(false);
+      if (stopped) break;
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      delay = Math.min(delay * 2, STREAM_RETRY_MAX_MS);
+    }
+    setLive(false);
+  })();
+
+  return () => {
+    stopped = true;
+    controller?.abort();
+    unsubscribeOnline();
+    setLive(false);
+  };
+}

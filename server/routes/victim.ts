@@ -11,7 +11,8 @@ import {
   type IncidentRecord, type LogRecord, type Need, type ReportRecord, type ReportSubmission, type TrackView,
 } from '../../shared/types';
 import { fromRow, fromRows, submissionToReportRow } from '../mappers';
-import { addLog, assignmentsOf, getIncident, processReport, recomputeIncident } from '../pipeline';
+import { addLog, assignmentsOf, enqueueReport, getIncident, recomputeIncident } from '../pipeline';
+import { openStream } from '../events';
 import { uploadBase64 } from '../storage';
 import { db } from '../supabase';
 
@@ -23,6 +24,22 @@ const PIN_RE = new RegExp(`^\\d{${PIN_LENGTH}}$`);
 const PHONE_RE = new RegExp(`^\\+?\\d{${PHONE_MIN_DIGITS},${PHONE_MAX_DIGITS}}$`);
 // Storage paths allow audio.{webm|mp4|ogg} (architecture §6.7); MediaRecorder may add ";codecs=…".
 export const AUDIO_EXT_RE = /^audio\/(webm|mp4|ogg)(;.*)?$/;
+
+// Uploads must be real base64 of the file type they claim (not just any string of the allowed length).
+const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
+const isBase64 = (s: string) => s.length % 4 === 0 && BASE64_RE.test(s);
+const head = (b64: string) => Buffer.from(b64.slice(0, 24), 'base64');
+/** Photo: the phone always re-encodes to JPEG (BR-04), which starts with FF D8 FF. */
+export const isJpegBase64 = (b64: string) => isBase64(b64) && head(b64).subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]));
+/** Audio: the container's signature must match the claimed mime (WebM/EBML, MP4 "ftyp", Ogg "OggS"). */
+export function isAudioBase64(b64: string, mime: string): boolean {
+  const ext = AUDIO_EXT_RE.exec(mime)?.[1];
+  if (!ext || !isBase64(b64)) return false;
+  const h = head(b64);
+  if (ext === 'webm') return h.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]));
+  if (ext === 'mp4') return h.subarray(4, 8).toString('latin1') === 'ftyp';
+  return h.subarray(0, 4).toString('latin1') === 'OggS';
+}
 
 const invalid = (message: string) => new ApiError('VALIDATION', message);
 const isStr = (v: unknown): v is string => typeof v === 'string';
@@ -61,12 +78,14 @@ function validateSubmission(body: unknown): ReportSubmission {
 
   if (!optStr(b.photoBase64 ?? null)) throw invalid('Photo is invalid.');
   if (isStr(b.photoBase64) && b.photoBase64.length > MAX_PHOTO_BASE64) throw invalid('Photo is too large.');
+  if (isStr(b.photoBase64) && b.photoBase64 && !isJpegBase64(b.photoBase64)) throw invalid('Photo is not a valid JPEG image.');
 
   const hasAudio = isStr(b.audioBase64) && b.audioBase64.length > 0;
   if (!optStr(b.audioBase64 ?? null)) throw invalid('Voice note is invalid.');
   if (hasAudio) {
     if ((b.audioBase64 as string).length > MAX_AUDIO_BASE64) throw invalid('Voice note is too large.');
     if (!isStr(b.audioMime) || !AUDIO_EXT_RE.test(b.audioMime)) throw invalid('Voice note format is not supported.');
+    if (!isAudioBase64(b.audioBase64 as string, b.audioMime)) throw invalid('Voice note is not a valid recording.');
     if (!isNum(b.audioSeconds) || b.audioSeconds < 0 || b.audioSeconds > MAX_AUDIO_SECONDS) {
       throw invalid(`Voice note must be at most ${MAX_AUDIO_SECONDS} seconds.`);
     }
@@ -142,7 +161,7 @@ victimRouter.post('/reports', async (req, res) => {
   }
 
   res.status(201).json({ ok: true, code: sub.code });
-  void processReport(sub.id); // not awaited (architecture D9)
+  enqueueReport(sub.id); // processed in the background (architecture D9)
 });
 
 // ---------------------------------------------------------------- tracking (F04) and phone verification (F21)
@@ -188,6 +207,21 @@ victimRouter.post('/track', async (req, res) => {
     chatOpen: assignments.some((a) => CHAT_OPEN_ASSIGNMENT.includes(a.status)),
   };
   res.json(view);
+});
+
+// POST /api/track/events {code, pin} — Server-Sent Events for this report only. The payload is empty: a victim's
+// screen learns only that something changed, then refetches /api/track (architecture D12).
+victimRouter.post('/track/events', async (req, res) => {
+  const r = await victimReport(req.body);
+  let incidentId = r.incidentId;
+  openStream(res, async (c) => {
+    if (c.reportId === r.id) incidentId = c.incidentId; // linked, finished processing, or a chat message
+    else if (!incidentId || c.incidentId !== incidentId) return null;
+    // Follow a merge: the report may now belong to another incident.
+    const { data } = await db.from('reports').select('incident_id').eq('id', r.id).maybeSingle();
+    if (data?.incident_id) incidentId = data.incident_id;
+    return {};
+  });
 });
 
 // POST /api/track/verify-phone {code, pin, phone, otp} — BR-140 (no SMS is sent).

@@ -109,7 +109,8 @@ function TrackForm({ onSubmit }: { onSubmit: (c: Creds) => void }) {
 }
 
 function TrackStatus({ creds, onSignOut }: { creds: Creds; onSignOut: () => void }) {
-  const track = usePoll<TrackView>(() => api.track(creds.code, creds.pin), POLL_TRACK_MS, [creds.code, creds.pin]);
+  const track = usePoll<TrackView>(() => api.track(creds.code, creds.pin), POLL_TRACK_MS, [creds.code, creds.pin], true,
+    (onChange, onLive) => api.watchTrack(creds.code, creds.pin, onChange, onLive));
   const t = track.data;
   const { t: tr, server, step } = useI18n();
 
@@ -185,7 +186,8 @@ function TrackStatus({ creds, onSignOut }: { creds: Creds; onSignOut: () => void
 }
 
 function VictimChat({ creds, open, step }: { creds: Creds; open: boolean; step: TrackView['step'] }) {
-  const chat = usePoll(() => api.getVictimChat(creds.code, creds.pin), open ? POLL_CHAT_MS : POLL_TRACK_MS, [creds.code, creds.pin, open]);
+  const chat = usePoll(() => api.getVictimChat(creds.code, creds.pin), open ? POLL_CHAT_MS : POLL_TRACK_MS, [creds.code, creds.pin, open], true,
+    (onChange, onLive) => api.watchTrack(creds.code, creds.pin, onChange, onLive));
   const hasMessages = (chat.data?.messages.length ?? 0) > 0;
   const { t } = useI18n();
   if (!open && !hasMessages) {

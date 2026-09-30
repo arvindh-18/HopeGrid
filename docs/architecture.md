@@ -65,7 +65,7 @@ There is no self-registration. All staff accounts are created by the seed script
 | D9 | Report processing runs inside the server process after responding (not awaited). On server start, all `PENDING` reports are processed. | No queue infrastructure; nothing lost on restart. |
 | D10 | Local LLM inside the server via `node-llama-cpp` (Qwen2.5 3B Instruct, GGUF Q4_K_M) with JSON-schema grammar, temperature 0. Fallback: keyword extractor in `shared/`. | "Local AI"; demo never stalls. |
 | D11 | whisper.cpp inside the server via `@fugood/whisper.node` (prebuilt, language auto-detect) + ffmpeg from `@ffmpeg-installer/ffmpeg`. Models download into `models/` only with `npm run setup-ai` (server laptop); without them the server falls back per BR-11/BR-12. | Local, multilingual (Tamil + English), works on recorded audio. |
-| D12 | Polling (no websockets/realtime). Intervals in `shared/constants.ts`. | Simple and enough at demo scale. |
+| D12 | Polling, plus Server-Sent Events **change signals** (2026-09-29). Staff and victim screens open one stream (`/api/admin/events`, `/api/volunteer/events`, `POST /api/track/events`) that only says which incident changed (victims: that *their* report changed, with no ids). The screen then refetches through its normal API call, at most once per its polling interval. While the stream is live it polls only every `POLL_FALLBACK_MS`; without it, it polls as before. Intervals in `shared/constants.ts`. | Updates appear at once and idle polling drops ~6×. No data or new privacy surface on the stream, and still works when streams don't (proxies, errors). |
 | D13 | Leaflet + OpenStreetMap tiles; list view fallback. | Free, no API key. |
 | D14 | Media and all request bodies are JSON with base64 media (no multipart). | One code path for online and offline (outbox stores JSON). |
 | D15 | DB columns are `snake_case`; API JSON and TS are `camelCase`. Conversion only in `server/mappers.ts`. | No naming ambiguity. |
@@ -97,10 +97,16 @@ hopegrid/
 ├── .env.example
 ├── .gitignore
 ├── README.md
+├── CHANGES.md                    (log of the 2026-09-29 score-raising pass)
 ├── docs/
 │   ├── architecture.md
 │   ├── features.md
-│   └── rules.md
+│   ├── rules.md
+│   ├── problem.md · comparison.md · impact-and-deployment.md   (context, sourced)
+│   └── verification.md · evaluation.md · scaling.md              (evidence, measured)
+├── eval/                         (synthetic labelled data + evaluation scripts; results/ is gitignored)
+│   ├── README.md · reports.jsonl · heldout.jsonl · duplicate-pairs.jsonl
+│   └── run.ts · score.ts · bench.ts · prompt-experiment.ts · diagnose-type-bias.ts
 ├── supabase/
 │   └── schema.sql
 ├── models/                       (gitignored; AI + speech model files, downloaded by npm run setup-ai)
@@ -122,6 +128,7 @@ hopegrid/
 │   ├── ai.ts
 │   ├── transcribe.ts
 │   ├── pipeline.ts
+│   ├── events.ts                 (live change signals, D12)
 │   ├── routes/
 │   │   ├── victim.ts
 │   │   ├── public.ts
@@ -132,7 +139,8 @@ hopegrid/
 │   │   └── dev.ts
 │   └── scripts/
 │       ├── seed.ts
-│       └── setup-models.ts       (npm run setup-ai)
+│       ├── setup-models.ts       (npm run setup-ai)
+│       └── cleanup.ts            (retention: dry run unless --apply)
 ├── src/
 │   ├── main.tsx
 │   ├── App.tsx
@@ -178,7 +186,12 @@ hopegrid/
 │           ├── VolunteerHome.tsx
 │           └── AssignmentPage.tsx
 └── tests/
-    └── rules.test.ts
+    ├── rules.test.ts
+    └── integration/              (API tests: real routers + pipeline, Supabase/LLM/Whisper replaced)
+        ├── api.test.ts
+        ├── fakeSupabase.ts       (in-memory tables built from supabase/schema.sql)
+        ├── stubs.ts              (LLM and Whisper stand-ins)
+        └── testApp.ts            (routers wired like server/index.ts)
 ```
 
 ### 5.1 File responsibilities
@@ -187,7 +200,7 @@ hopegrid/
 
 | File | Responsibility |
 |---|---|
-| package.json | Scripts: `dev` (vite + server via concurrently), `build` (vite build), `start` (server serving dist), `seed` (server/scripts/seed.ts), `test` (vitest). |
+| package.json | Scripts: `dev` (vite + server via concurrently), `build` (vite build), `start` (server serving dist), `seed` (server/scripts/seed.ts), `test` (vitest), `setup-ai`, `tunnel`, `eval` / `bench` (eval/), `cleanup` (server/scripts/cleanup.ts). |
 | vite.config.ts | React, Tailwind, PWA plugin (manifest name "HopeGrid", app-shell precache), dev proxy `/api` → `http://localhost:3000`. |
 | .env.example | All variables in §9. |
 | .gitignore | node_modules, dist, .env, models/*, tmp/ |
@@ -221,12 +234,14 @@ hopegrid/
 | pipeline.ts | `processReport(reportId)`, `recomputeIncident(incidentId)`, `processPendingReports()`. Implements §11.2. |
 | routes/victim.ts | `/api/reports`, `/api/track`, `/api/track/verify-phone`. |
 | routes/public.ts | `/api/public/incidents`. |
+| events.ts | In-process change signals: `emitChange({incidentId, reportId?, volunteerId?})` (called on every incident update, log, report link/finish, chat message and assignment), merged per `STREAM_COALESCE_MS`; `openStream(res, pick)` writes a Server-Sent Events stream with a ping every `STREAM_PING_MS`. |
 | routes/authRoutes.ts | `/api/auth/login`, `/api/auth/me`. |
 | routes/admin.ts | All `/api/admin/*` routes. |
 | routes/volunteer.ts | `/api/volunteer/*` except chat. |
 | routes/messages.ts | Victim chat (`/api/track/chat*`) and volunteer chat (`/api/volunteer/assignments/:id/chat`). |
-| routes/dev.ts | `/api/dev/reset` — only mounted when `DEV_MODE=true`. |
+| routes/dev.ts | `/api/dev/reset` — only mounted when `DEV_MODE=true`, and only answers requests made on the server laptop itself (loopback, no forwarding headers, `Host: localhost`). |
 | scripts/seed.ts | Deletes all rows + storage objects, creates staff auth users if missing, inserts seed data (§12). Also used by `/api/dev/reset`. |
+| scripts/cleanup.ts | Retention: deletes closed incidents (RESOLVED/REJECTED/MERGED) not updated for N days with all their rows and media, in foreign-key order. Dry run unless `--apply`. |
 
 **src/** (frontend)
 
@@ -239,7 +254,7 @@ hopegrid/
 | offline/outbox.ts | Queue, send, retry reports (BR-02). `start()`, `enqueue()`, `list()`, `retryAll()`, `remove(id)`, `subscribe(fn)`. |
 | offline/deviceId.ts | `getDeviceId()` — UUID created on first use, stored in IndexedDB. |
 | offline/useOnline.ts | `navigator.onLine` + events. |
-| hooks/usePoll.ts | `usePoll(fn, intervalMs)` → `{data, error, loading, refresh}`. |
+| hooks/usePoll.ts | `usePoll(fn, intervalMs, deps?, enabled?, watch?)` → `{data, error, loading, refresh}`. With `watch` (a live change signal): refresh on a signal (at most once per `intervalMs`); poll only every `POLL_FALLBACK_MS` while the stream is live. |
 | hooks/useAuth.tsx | Auth context: `{user, token, login, logout}`; token in sessionStorage. |
 | hooks/useLiveDictation.ts | Optional (F24): browser SpeechRecognition wrapper. |
 | i18n/index.tsx | F25: `LanguageProvider`, `useI18n()` → `{t, rich, server, ago, type, need, advice…}`, `LanguagePicker`, `EnglishOnly` (staff screens). Keys in `en.ts`; `ta.ts`/`hi.ts` must cover every key (type-checked). |
@@ -256,6 +271,7 @@ hopegrid/
 | components/ChatBox.tsx | Message list, text input, quick replies, voice message, share-location button; used by victim, volunteer, admin (read-only prop). |
 | pages/* | One screen each (see `features.md` §S). Pages hold no business logic and no fetch calls. |
 | tests/rules.test.ts | Unit tests for all `shared/` functions. |
+| tests/integration/* | API tests through real HTTP against the real routers and pipeline; Supabase is an in-memory fake that enforces `schema.sql` constraints; LLM and Whisper are stubbed (AR-31). |
 
 ### 5.2 Routes (frontend)
 
@@ -466,6 +482,7 @@ Body: `{ "error": { "code": ErrorCode, "message": string } }`
 | POST | /track/verify-phone | `{code, pin, phone, otp}` | `{ok:true}`; 400 if otp ≠ `123456` |
 | POST | /track/chat | `{code, pin}` | `{open: boolean, messages: ChatMessage[]}` |
 | POST | /track/chat/send | `{code, pin, text?, audioBase64?, audioMime?, lat?, lng?}` | `ChatMessage`; 409 CHAT_CLOSED |
+| POST | /track/events | `{code, pin}` | `text/event-stream`: `event: change` / `data: {}` when this report or its incident changes (no ids); 401 for a wrong code/PIN |
 
 ```text
 ReportSubmission = { id: uuid, code: string, pin: string, deviceId: string,
@@ -501,6 +518,7 @@ PublicIncident = { code, type, color: MarkerColor, area: string|null,
 
 | Method | Path | Request | Response |
 |---|---|---|---|
+| GET | /admin/events | — | `text/event-stream`: `event: change` / `data: {incidentId}` for every incident that changes |
 | GET | /admin/incidents | — | `{counts: {CRITICAL, HIGH, MEDIUM, LOW}, incidents: IncidentListItem[]}` |
 | GET | /admin/incidents/:id | — | `IncidentDetail` |
 | PATCH | /admin/incidents/:id | partial `{type, people, vulnerable, trapped, medical, danger, needs, lat, lng, locationText, publicArea, summary}` | `IncidentDetail` |
@@ -533,7 +551,7 @@ IncidentDetail = IncidentListItem & { lat, lng, publicArea, vulnerable, trapped,
   possibleDuplicate: {id, code, type, summary, distanceM: number|null} | null,
   related: {id, code, type, text}[],
   suggestions: VolunteerSuggestion[],
-  assignments: {id, volunteerId, volunteerName, status, reason, updatedAt}[],
+  assignments: {id, volunteerId, volunteerName, volunteerPhone, status, reason, updatedAt}[],   // phone: staff-only, for the WhatsApp button
   allocations: {id, resourceName, quantity, unit, createdAt}[],
   logs: {at, text, public}[],
   chats: ChatThread[] }                       // read-only for admin
@@ -556,6 +574,7 @@ Resource = { id, name, category, quantity, unit, locationText }
 
 | Method | Path | Request | Response |
 |---|---|---|---|
+| GET | /volunteer/events | — | `text/event-stream`: `data: {incidentId}` only for incidents this volunteer is assigned to |
 | GET | /volunteer/me | — | `VolunteerProfile` |
 | PATCH | /volunteer/me | partial `{availability, skills, equipment, vehicle, lat, lng}` | `VolunteerProfile` |
 | GET | /volunteer/assignments | — | `VolunteerAssignment[]` (active first, then last 5 finished) |
@@ -596,6 +615,8 @@ getMyProfile()  updateMyProfile(patch)  listMyAssignments()
 updateAssignmentStatus(id, status, reason?)
 getAssignmentChat(id)  sendVolunteerMessage(id, reportId, msg)
 resetDemo()
+watchAdmin(onChange(incidentId|null), onLive?)   watchVolunteer(onChange, onLive?)
+watchTrack(code, pin, onChange, onLive?)          // each returns an unsubscribe function (D12)
 ```
 
 Errors are thrown as `ApiError {code, message}` in both implementations.
@@ -676,9 +697,9 @@ recomputeIncident(id):
 ### 11.3 Assignment and chat
 
 ```text
-Admin assign → assignment ASSIGNED → volunteer sees offer (poll)
+Admin assign → assignment ASSIGNED → volunteer sees offer (live signal, else poll)
 Volunteer ACCEPT → incident IN_PROGRESS, volunteer BUSY, chat opens
-Victim Track page (poll) → chat visible → messages via /track/chat/send
+Victim Track page (live signal, else poll) → chat visible → messages via /track/chat/send
 Volunteer AssignmentPage → one thread per reporter → messages via /volunteer/.../chat
 DONE / UNABLE / CANCELLED / incident RESOLVED → chat closed (read-only history)
 ```

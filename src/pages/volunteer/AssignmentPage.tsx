@@ -34,10 +34,11 @@ const NEXT: Partial<Record<AssignmentStatus, { to: AssignmentStatus; label: stri
 export default function AssignmentPage() {
   const { id = '' } = useParams();
   const toast = useToast();
-  const list = usePoll(() => api.listMyAssignments(), POLL_VOLUNTEER_MS, [id]);
+  const list = usePoll(() => api.listMyAssignments(), POLL_VOLUNTEER_MS, [id], true, (onChange, onLive) => api.watchVolunteer(onChange, onLive));
   const a = list.data?.find((x) => x.id === id) ?? null;
   const chatOpen = !!a && CHAT_OPEN_ASSIGNMENT.includes(a.status);
-  const chat = usePoll(() => api.getAssignmentChat(id), chatOpen ? POLL_CHAT_MS : POLL_VOLUNTEER_MS, [id], !!a && a.status !== 'ASSIGNED');
+  const chat = usePoll(() => api.getAssignmentChat(id), chatOpen ? POLL_CHAT_MS : POLL_VOLUNTEER_MS, [id], !!a && a.status !== 'ASSIGNED',
+    (onChange, onLive) => api.watchVolunteer(onChange, onLive));
   const [busy, setBusy] = useState(false);
   const [unable, setUnable] = useState(false);
   const [confirmDone, setConfirmDone] = useState(false);

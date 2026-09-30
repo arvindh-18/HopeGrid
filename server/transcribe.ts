@@ -79,19 +79,24 @@ export interface Transcript {
 
 const clean = (s: string) => s.replace(/\s+/g, ' ').trim();
 
-/**
- * Download audio, convert to 16 kHz mono PCM, transcribe with language auto-detect. Non-English speech is also
- * translated to English (a second Whisper pass) so the AI, which is strongest in English, can structure it.
- * Throws when nothing could be transcribed; a failed translation only leaves `english` null.
- */
+/** Download a voice note from Storage and transcribe it (transcribeAudio). The 60 s limit includes the download. */
 export async function transcribe(storagePath: string): Promise<Transcript> {
   const deadline = Date.now() + WHISPER_TIMEOUT_MS;
+  const { downloadBuffer } = await import('./storage'); // lazy: model setup must work before .env exists
+  return transcribeAudio(await downloadBuffer(storagePath), storagePath.split('.').pop() ?? 'webm', deadline);
+}
+
+/**
+ * Audio bytes → 16 kHz mono PCM (ffmpeg) → Whisper with language auto-detect. Non-English speech is also translated to
+ * English (a second Whisper pass) so the AI, which is strongest in English, can structure it.
+ * Throws when nothing could be transcribed; a failed translation only leaves `english` null.
+ */
+export async function transcribeAudio(audio: Buffer, ext: string, deadline = Date.now() + WHISPER_TIMEOUT_MS): Promise<Transcript> {
   const remaining = () => Math.max(1, deadline - Date.now());
-  const input = resolve(TMP_DIR, `${randomUUID()}.${storagePath.split('.').pop() ?? 'webm'}`);
+  const input = resolve(TMP_DIR, `${randomUUID()}.${ext}`);
   await mkdir(TMP_DIR, { recursive: true });
   try {
-    const { downloadBuffer } = await import('./storage'); // lazy: model setup must work before .env exists
-    await writeFile(input, await downloadBuffer(storagePath));
+    await writeFile(input, audio);
     const { stdout } = await run(
       ffmpeg.path,
       ['-loglevel', 'error', '-i', input, '-ar', '16000', '-ac', '1', '-f', 's16le', '-'],

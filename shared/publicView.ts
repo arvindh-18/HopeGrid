@@ -1,5 +1,5 @@
 // shared/publicView.ts — the ONLY way incidents leave the system to anonymous users (BR-80…BR-84, AR-22).
-import { NEARBY_RADIUS_M, PUBLIC_MIN_CONFIDENCE, PUBLIC_RESOLVED_HOURS } from './constants';
+import { NEARBY_RADIUS_M, PUBLIC_RESOLVED_HOURS } from './constants';
 import { distanceMeters } from './linking';
 import { confidenceBand } from './scoring';
 import type { IncidentStatus, IncidentType, MarkerColor, PriorityLevel, PublicIncident, PublicStatus } from './types';
@@ -19,10 +19,14 @@ export interface PublicSourceIncident {
   updatedAt: string;
 }
 
+/**
+ * BR-80. An incident reaches the public map only after a coordinator has acted on it (verified it, sent a volunteer,
+ * or resolved it). NEW incidents are never public, whatever their confidence: one unverified report — with a photo,
+ * or a phone "verified" with the demo OTP — would otherwise be enough to put a hazard on the community map.
+ */
 export function isPublic(i: PublicSourceIncident, now: Date = new Date()): boolean {
   if (i.lat === null || i.lng === null) return false;
   if (i.status === 'VERIFIED' || i.status === 'IN_PROGRESS') return true;
-  if (i.status === 'NEW') return i.confidence >= PUBLIC_MIN_CONFIDENCE;
   if (i.status === 'RESOLVED' && i.resolvedAt) {
     return now.getTime() - new Date(i.resolvedAt).getTime() <= PUBLIC_RESOLVED_HOURS * 3_600_000;
   }

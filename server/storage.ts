@@ -36,6 +36,15 @@ export async function signedUrls(paths: (string | null)[]): Promise<Map<string, 
   return out;
 }
 
+/** Delete the given objects (missing ones are ignored). Used by the retention clean-up. */
+export async function removeFiles(paths: string[]): Promise<void> {
+  const unique = [...new Set(paths.filter(Boolean))];
+  for (let i = 0; i < unique.length; i += 100) {
+    const { error } = await bucket().remove(unique.slice(i, i + 100));
+    if (error) throw new Error(`Could not delete media: ${error.message}`);
+  }
+}
+
 /** Delete every object under a folder (used by the seed script). */
 export async function removeFolder(folder: string): Promise<void> {
   const { data, error } = await bucket().list(folder, { limit: 1000 });

@@ -44,7 +44,7 @@
 - **AR-32** Before reporting done: run `npm run test` and type-check, and click through the feature against the real backend.
 - **AR-33** Do not commit, push or merge unless explicitly told to.
 - **AR-34** Report when finished: files created, files modified, tests run and results, acceptance checks passed/failed, unresolved errors, assumptions made.
-- **AR-35** Keep it simple: no state-management libraries, no websockets/realtime, no ORMs, no extra services. Prefer the simplest code that satisfies the acceptance checks.
+- **AR-35** Keep it simple: no state-management libraries, no websockets or realtime services, no ORMs, no extra services. The one exception is the server's own Server-Sent Events change signals (architecture D12). They carry no data, and polling stays as the fallback. Prefer the simplest code that satisfies the acceptance checks.
 - **AR-36** Only the lead edits: `shared/types.ts`, `shared/constants.ts`, `src/App.tsx`, `src/data/index.ts`, `supabase/schema.sql`, `server/scripts/seed.ts`, `server/index.ts`, `package.json`.
 
 ---
@@ -147,6 +147,12 @@ Hindi keywords (Devanagari and Hinglish) are listed in `shared/keywordExtractor.
   - `summary` truncated to 200 characters.
   - `places` limited to 5.
 - Any error, timeout or unparseable JSON → use BR-10 and set `ai_source = KEYWORDS`.
+
+**BR-11a Incident type when the AI answered** (`chooseType` in `shared/keywordExtractor.ts`): if the keyword
+extractor (BR-10) finds a type other than OTHER, that type is used; otherwise the AI's type. Adopted 2026-09-29 after
+measurement: the keyword rules are usually right when they fire, while the local AI over-uses HEAVY_RAIN. On the
+synthetic evaluation sets, type accuracy went from 58% to 70% (main) and 55% to 70% (held-out); no other field is
+affected (docs/evaluation.md). `ai_source` stays `AI`.
 
 **BR-12 Transcription.**
 - If a report has audio: `transcribe()` with language auto-detect and timeout `WHISPER_TIMEOUT_MS`.
@@ -322,10 +328,11 @@ Row text: "<Type label> · <distance> away · <X min earlier|later>". Sort by di
 
 **BR-80 Visible incidents:** incidents with coordinates AND one of:
 - status ∈ {VERIFIED, IN_PROGRESS};
-- status NEW with confidence ≥ `PUBLIC_MIN_CONFIDENCE`;
 - status RESOLVED with `resolved_at` within `PUBLIC_RESOLVED_HOURS`.
 
-Never REJECTED or MERGED.
+Never NEW, REJECTED or MERGED. NEW incidents stay off the public map whatever their confidence, because a single
+unverified report can reach confidence 50 on its own (a photo: 35 + 15; or a phone "verified" with the demo OTP:
+35 + 10 + 5). A hazard becomes public once a coordinator acts on it: verifies it, sends a volunteer, or resolves it.
 
 **BR-81 Fields:**
 
@@ -493,10 +500,13 @@ Availability: a volunteer may set AVAILABLE or OFFLINE only while they have no A
 | MAX_PHOTO_BASE64 / MAX_AUDIO_BASE64 | 3_000_000 / 3_000_000 characters |
 | AI_TIMEOUT_MS / WHISPER_TIMEOUT_MS | 30_000 / 60_000 |
 | OUTBOX_RETRY_MS | 15_000 |
+| POLL_RESOURCES_MS / POLL_RESOURCE_PICKER_MS | 30_000 / 60_000 |
+| POLL_FALLBACK_MS (polling while a live change stream is connected) | 30_000 |
+| STREAM_PING_MS / STREAM_COALESCE_MS / STREAM_RETRY_MS / STREAM_RETRY_MAX_MS | 25_000 / 100 / 3_000 / 30_000 |
 | POLL_ADMIN_MS / POLL_VOLUNTEER_MS / POLL_CHAT_MS / POLL_TRACK_MS / POLL_PUBLIC_MS | 5_000 / 5_000 / 4_000 / 10_000 / 15_000 |
 | DUP_CLOSE_DISTANCE_M / DUP_MAX_DISTANCE_M / DUP_MAX_HOURS | 200 / 500 / 3 |
 | RELATED_MAX_DISTANCE_M / RELATED_MAX_HOURS | 2000 / 12 |
-| PUBLIC_MIN_CONFIDENCE / PUBLIC_RESOLVED_HOURS | 50 / 6 |
+| PUBLIC_RESOLVED_HOURS | 6 |
 | NEARBY_RADIUS_M | 2000 |
 | RECENT_REPORT_MINUTES | 60 |
 | OFFLINE_SUBMIT_THRESHOLD_MIN | 2 (shows "sent while offline") |

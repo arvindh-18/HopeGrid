@@ -16,6 +16,7 @@ import { fromRow, fromRows, toRow } from '../mappers';
 import {
   addLog, allAssignments, endAssignment, getIncident, isUuid, recomputeIncident, reportsOf, toLink, updateIncident,
 } from '../pipeline';
+import { emitChange, openStream } from '../events';
 import { signedUrls } from '../storage';
 import { db } from '../supabase';
 import { messagesWhere, toChatMessages } from './messages';
@@ -76,6 +77,7 @@ async function detail(id: string): Promise<IncidentDetail> {
   const urls = await signedUrls(reports.flatMap((r) => [r.photoPath, r.audioPath]));
   const chatMessages = await toChatMessages(messages);
   const nameOf = (vid: string) => volunteers.find((v) => v.id === vid)?.name ?? 'Volunteer';
+  const phoneOf = (vid: string) => volunteers.find((v) => v.id === vid)?.phone ?? null; // coordinators only: for the WhatsApp button
 
   return {
     ...listItem(i, reports, asg, dup?.code ?? null),
@@ -96,7 +98,7 @@ async function detail(id: string): Promise<IncidentDetail> {
     related: findRelated(toLink(i, []), others.map((o) => toLink(o, [])), humanize)
       .map(({ id: rid, code, type, text }) => ({ id: rid, code, type, text })),
     suggestions: canSuggest ? rankVolunteers(i, volunteers, assignments) : [],
-    assignments: asg.map((a) => ({ id: a.id, volunteerId: a.volunteerId, volunteerName: nameOf(a.volunteerId), status: a.status, reason: a.reason, updatedAt: a.updatedAt })),
+    assignments: asg.map((a) => ({ id: a.id, volunteerId: a.volunteerId, volunteerName: nameOf(a.volunteerId), volunteerPhone: phoneOf(a.volunteerId), status: a.status, reason: a.reason, updatedAt: a.updatedAt })),
     allocations: allocations.map((a) => {
       const res = resources.find((r) => r.id === a.resourceId);
       return { id: a.id, resourceName: res?.name ?? 'Resource', quantity: a.quantity, unit: res?.unit ?? '', createdAt: a.createdAt };
@@ -110,6 +112,11 @@ async function detail(id: string): Promise<IncidentDetail> {
 }
 
 // ---------------------------------------------------------------- dashboard (F12) and incident page (F13)
+
+// GET /api/admin/events — Server-Sent Events: the id of every incident that changes (architecture D12).
+adminRouter.get('/events', (_req, res) => {
+  openStream(res, (c) => ({ incidentId: c.incidentId }));
+});
 
 // GET /api/admin/incidents → {counts, incidents} ordered per BR-120
 adminRouter.get('/incidents', async (_req, res) => {
@@ -314,6 +321,7 @@ adminRouter.post('/incidents/:id/assign', async (req, res) => {
   if (!isEligible(v, i.id, assignments)) throw new ApiError('INVALID_STATE', `${v.name} is not available for this incident.`);
   const { error } = await db.from('assignments').insert({ incident_id: i.id, volunteer_id: v.id, status: 'ASSIGNED' });
   if (error) throw new Error(`Assignment insert failed: ${error.message}`);
+  emitChange({ incidentId: i.id, volunteerId: v.id }); // lets that volunteer's stream start following this incident
   await addLog(i.id, `Volunteer ${v.name} assigned`, false);
   await updateIncident(i.id, {});
   res.json(await detail(i.id));

@@ -1,5 +1,6 @@
 // S11 Resources — relief supplies list with add and inline edit (features.md F21).
 import { useState } from 'react';
+import { POLL_RESOURCES_MS } from '../../../shared/constants';
 import { ApiError, RESOURCE_CATEGORIES, type Resource, type ResourceCategory, type ResourceInput } from '../../../shared/types';
 import { Tag } from '../../components/Badges';
 import { IconEdit, IconPlus } from '../../components/Icons';
@@ -12,7 +13,7 @@ import { CATEGORY_LABEL } from '../../lib/labels';
 
 export default function Resources() {
   const toast = useToast();
-  const q = usePoll(() => api.listResources(), 30_000);
+  const q = usePoll(() => api.listResources(), POLL_RESOURCES_MS);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
 

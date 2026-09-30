@@ -31,6 +31,16 @@ export const POLL_VOLUNTEER_MS = 5_000;
 export const POLL_CHAT_MS = 4_000;
 export const POLL_TRACK_MS = 10_000;
 export const POLL_PUBLIC_MS = 15_000;
+export const POLL_RESOURCES_MS = 30_000;          // admin Resources page
+export const POLL_RESOURCE_PICKER_MS = 60_000;    // resource list inside the "Allocate" dialog
+
+// Live change signals (Server-Sent Events, architecture D12). A connected screen refreshes on each signal (at most
+// once per its own polling interval) and otherwise polls only every POLL_FALLBACK_MS.
+export const POLL_FALLBACK_MS = 30_000;
+export const STREAM_PING_MS = 25_000;             // keeps proxies and the tunnel from closing an idle stream
+export const STREAM_COALESCE_MS = 100;            // one signal per incident per window, however many writes happened
+export const STREAM_RETRY_MS = 3_000;             // first reconnect delay; doubles up to STREAM_RETRY_MAX_MS
+export const STREAM_RETRY_MAX_MS = 30_000;
 
 export const DUP_CLOSE_DISTANCE_M = 200;
 export const DUP_MAX_DISTANCE_M = 500;
@@ -38,7 +48,6 @@ export const DUP_MAX_HOURS = 3;
 export const RELATED_MAX_DISTANCE_M = 2000;
 export const RELATED_MAX_HOURS = 12;
 
-export const PUBLIC_MIN_CONFIDENCE = 50;
 export const PUBLIC_RESOLVED_HOURS = 6;
 export const NEARBY_RADIUS_M = 2000;
 export const RECENT_REPORT_MINUTES = 60;
