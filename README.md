@@ -41,6 +41,11 @@ First-time setup:
 3. `npm run seed` creates the staff accounts and demo data.
 4. In Supabase Auth settings, set JWT expiry to 86400 s so staff sessions last the whole demo.
 
+Website on Vercel, server on this laptop: `vercel.json` makes Vercel serve the pages and forward `/api/*` to the
+laptop. Run `npm start`, then `npm run tunnel:vercel` (keep both open). It starts a Cloudflare quick tunnel and writes
+its address into `vercel.json`; commit and push that file so Vercel redeploys. The quick-tunnel address changes each
+time the tunnel restarts, so repeat the push after every restart. No keys are needed on Vercel.
+
 Demo on phones: `npm run build && npm start`, then `npm run tunnel` in a second terminal and open the printed `https://…trycloudflare.com` link (HTTPS is needed for GPS and the microphone).
 
 In dev builds, the lime **Demo** button can reset demo data (`/api/dev/reset`, only from the server laptop itself) or simulate offline.

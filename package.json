@@ -13,6 +13,7 @@
     "build": "tsc --noEmit && vite build",
     "start": "tsx server/index.ts",
     "tunnel": "cloudflared tunnel --url http://localhost:3000",
+    "tunnel:vercel": "tsx server/scripts/tunnel-vercel.ts",
     "preview": "vite preview",
     "seed": "tsx server/scripts/seed.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit --strict --target es2022 --module esnext --moduleResolution bundler --skipLibCheck --types node server/index.ts server/scripts/cleanup.ts eval/run.ts eval/bench.ts eval/prompt-experiment.ts eval/diagnose-type-bias.ts",
