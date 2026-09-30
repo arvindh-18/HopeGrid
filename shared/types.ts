@@ -34,6 +34,16 @@ export type AssignmentStatus =
 export const ACTIVE_ASSIGNMENT: AssignmentStatus[] = ['ASSIGNED', 'ACCEPTED', 'EN_ROUTE', 'ON_SITE', 'ASSISTING'];
 export const CHAT_OPEN_ASSIGNMENT: AssignmentStatus[] = ['ACCEPTED', 'EN_ROUTE', 'ON_SITE', 'ASSISTING'];
 
+/** Auto-dispatch (F28): OFF — coordinators assign; OVERLOAD — the system assigns while more than `threshold`
+ * incidents are waiting; ALWAYS — the system assigns every waiting incident. */
+export const DISPATCH_MODES = ['OFF', 'OVERLOAD', 'ALWAYS'] as const;
+export type DispatchMode = (typeof DISPATCH_MODES)[number];
+export interface DispatchSettings { mode: DispatchMode; threshold: number; responseMinutes: number }
+/** GET/PUT /api/admin/dispatch */
+export interface DispatchState { settings: DispatchSettings; waiting: number; pendingOffers: number }
+/** A volunteer's SMS answer to an SOS (BR-163). */
+export interface VolunteerReply { answer: 'ACCEPT' | 'DECLINE'; code: string | null }
+
 export const UNABLE_REASONS = ['NO_ACCESS', 'MISSING_EQUIPMENT', 'UNSAFE', 'PERSONAL', 'TOO_FAR', 'OTHER'] as const;
 export type UnableReason = (typeof UNABLE_REASONS)[number];
 
@@ -51,7 +61,7 @@ export type ReportChannel = 'APP' | 'SMS';
 /** Media an SMS report says is still on the phone; it arrives with the full report (BR-07). */
 export type PendingMedia = 'PHOTO' | 'AUDIO';
 /** What POST /api/sms/incoming did with one SMS (BR-06). */
-export type SmsOutcome = 'CREATED' | 'ADDED' | 'ALREADY_RECEIVED' | 'IGNORED';
+export type SmsOutcome = 'CREATED' | 'ADDED' | 'ALREADY_RECEIVED' | 'IGNORED' | 'ANSWER';
 export type AiSource = 'AI' | 'KEYWORDS';
 export type TranscriptStatus = 'NONE' | 'DONE' | 'FAILED';
 export type MessageSender = 'VICTIM' | 'VOLUNTEER';
@@ -236,7 +246,7 @@ export interface IncidentDetail extends IncidentListItem {
   possibleDuplicate: { id: string; code: string; type: IncidentType; summary: string | null; distanceM: number | null } | null;
   related: { id: string; code: string; type: IncidentType; text: string }[];
   suggestions: VolunteerSuggestion[];
-  assignments: { id: string; volunteerId: string; volunteerName: string; volunteerPhone: string | null; status: AssignmentStatus; reason: string | null; updatedAt: string }[]; // staff-only view
+  assignments: { id: string; volunteerId: string; volunteerName: string; volunteerPhone: string | null; status: AssignmentStatus; reason: string | null; auto: boolean; respondBy: string | null; updatedAt: string }[]; // staff-only view
   allocations: { id: string; resourceName: string; quantity: number; unit: string; createdAt: string }[];
   logs: { at: string; text: string; public: boolean }[];
   chats: ChatThread[];
@@ -284,6 +294,9 @@ export interface VolunteerAssignment {
   id: string;
   status: AssignmentStatus;
   reason: string | null;
+  /** Sent by auto-dispatch (F28): an SOS that must be answered by `respondBy`. */
+  auto: boolean;
+  respondBy: string | null;
   updatedAt: string;
   incident: {
     id: string;
@@ -358,7 +371,7 @@ export interface ApplicationRecord {
 export interface ProfileRecord {
   id: string; name: string; email: string; role: Role; phone: string | null;
   skills: Skill[]; equipment: Equipment[]; vehicle: Vehicle; availability: Availability;
-  lat: number | null; lng: number | null; createdAt: string;
+  lat: number | null; lng: number | null; pushToken: string | null; createdAt: string;
 }
 export interface IncidentRecord {
   id: string; code: string; type: IncidentType; lat: number | null; lng: number | null; locationText: string | null;
@@ -367,7 +380,7 @@ export interface IncidentRecord {
   priorityScore: number; priority: PriorityLevel; priorityReasons: Reason[]; priorityOverride: PriorityLevel | null;
   overrideReason: string | null; escalationRecommended: boolean; escalationReasons: Reason[]; escalatedAt: string | null;
   verifiedAt: string | null; onSiteAt: string | null; resolvedAt: string | null; rejectReason: string | null;
-  possibleDuplicateOf: string | null; mergedInto: string | null; createdAt: string; updatedAt: string;
+  possibleDuplicateOf: string | null; mergedInto: string | null; autoDispatchedAt: string | null; createdAt: string; updatedAt: string;
 }
 export interface ReportRecord {
   id: string; code: string; pin: string; deviceId: string; incidentId: string | null; text: string;
@@ -380,7 +393,7 @@ export interface ReportRecord {
 }
 export interface AssignmentRecord {
   id: string; incidentId: string; volunteerId: string; status: AssignmentStatus; reason: string | null;
-  createdAt: string; updatedAt: string;
+  auto: boolean; respondBy: string | null; createdAt: string; updatedAt: string;
 }
 export interface MessageRecord {
   id: string; incidentId: string; reportId: string; assignmentId: string; sender: MessageSender; text: string | null;

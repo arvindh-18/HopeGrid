@@ -5,7 +5,7 @@ reproduce. Nothing here was estimated.
 
 | | |
 |---|---|
-| Date | 2026-09-29, 19:25 IST; counts updated 2026-09-30 (volunteer registration F26, map radius BR-85, Android app, reports by SMS F27) |
+| Date | 2026-09-29, 19:25 IST; counts updated 2026-09-30 (volunteer registration F26, map radius BR-85, Android app, reports by SMS F27, auto-dispatch F28) |
 | Machine | Apple M2, macOS 26.5.2 |
 | Node.js | v22.23.3 |
 | Test runner | Vitest 5.0.1 |
@@ -17,13 +17,13 @@ reproduce. Nothing here was estimated.
 | Check | Command | Result |
 |---|---|---|
 | Type check (frontend + tests, and strict server) | `npm run typecheck` | exit 0, no errors |
-| Business-rule unit tests | `npm test` (file `tests/rules.test.ts`) | 35 passed |
-| API integration tests | `npm test` (file `tests/integration/api.test.ts`) | 75 passed |
+| Business-rule unit tests | `npm test` (file `tests/rules.test.ts`) | 42 passed |
+| API integration tests | `npm test` (file `tests/integration/api.test.ts`) | 81 passed |
 | WhatsApp link builder | `npm test` (file `tests/whatsapp.test.ts`) | 2 passed |
 | Android app server address | `npm test` (file `tests/serverUrl.test.ts`) | 2 passed |
-| **All tests** | `npm test` | **114 passed, 0 failed** (4 files, ~3.8 s — the live-signal tests wait for signal windows) |
+| **All tests** | `npm test` | **127 passed, 0 failed** (4 files — the live-signal tests wait for signal windows) |
 | Production build | `npm run build` | exit 0 (`built in 347ms`, 22 files precached) |
-| Tests catch real bugs | 21 deliberate code breaks, see §4 | 21 of 21 caught |
+| Tests catch real bugs | 27 deliberate code breaks, see §4 | 27 of 27 caught (M23 after tightening its test) |
 
 Output of `npx vitest run` (end), after adding reports by SMS:
 ```
@@ -32,7 +32,7 @@ Output of `npx vitest run` (end), after adding reports by SMS:
    Duration  3.84s (tests 74%, transform 20%, import 5%)
 ```
 (Earlier runs: 68 tests after Phase 2, 74 after Phase 4, 83 after the approved follow-ups, 85 with the WhatsApp link
-tests, 97 with volunteer registration, 98 with the map radius, 102 with the Android app, 114 with reports by SMS. The suite was also run 3 times in a row after adding the stream tests: 83/83 each time.)
+tests, 97 with volunteer registration, 98 with the map radius, 102 with the Android app, 114 with reports by SMS, 127 with auto-dispatch. The suite was also run 3 times in a row after adding the stream tests: 83/83 each time.)
 
 ---
 
@@ -54,9 +54,9 @@ models, so the wiring is copied and must be kept in sync.
 
 ---
 
-## 3. What is covered (all 114 tests)
+## 3. What is covered (all 127 tests)
 
-### API integration tests (75)
+### API integration tests (81)
 **Report submission (F01, BR-02, BR-03)**
 - is idempotent: resending the same report returns the same code and creates nothing new, even when resent with a
   regenerated code
@@ -166,16 +166,30 @@ is intercepted
 - a report being processed is never changed: a follow-up during transcription gets a retryable 500 and succeeds
   afterwards; meanwhile the victim's tracking step stays REVIEWING (BR-90 change)
 
+**Auto-dispatch and SOS (F28, BR-160…BR-166)** — SMS gateway and Google/Firebase endpoints intercepted
+- off by default; 403 for a volunteer; three kinds of bad settings are 400; saved settings are read back
+- overloaded (threshold 2): nothing at 2 waiting; at 3, the two volunteers get SOS offers for the two most urgent (the
+  flood goes to Ravi, the swimmer), each with a 3-minute deadline and `auto_dispatched_at`; the third logs "no
+  available volunteer"; Ravi gets the SOS SMS with the code; volunteer and coordinator views show `auto`/`respondBy`
+- a passed deadline → DECLINED "No answer in time" → offered to Priya; Ravi's late accept is 409; Priya accepts
+- SMS "yes" from Ravi's number without +91 accepts (busy, in progress, confirmation SMS); "NO <code>" from Priya
+  declines and the next pass logs that nobody is free; "yes" with nothing waiting gets a helpful reply; answers never
+  become reports
+- an accepted auto-dispatched incident is not on the public map until the coordinator verifies it
+- with a generated service-account key: the push goes to the registered token with the Google token, whose JWT
+  signature verifies with the public key; Firebase's UNREGISTERED clears the token
+
 **Demo reset guard (F23)**
 - refused through the Cloudflare tunnel (`CF-Connecting-IP`), through any proxy (`X-Forwarded-For`) and for a
   public host name; allowed only as a direct request on the server laptop; the route doesn't exist when
   `DEV_MODE` is off
 
-### Business-rule unit tests (35)
+### Business-rule unit tests (42)
 Keyword extraction in English, Tamil and Hindi · the incident-type rule (BR-11a) · confidence · priority and
 escalation · duplicates and related incidents · merge fields · volunteer ranking · public view (including the
 stricter BR-80) · victim tracking steps · the SMS format (pack/unpack, shortening, bad headers, unreadable lines;
-BR-06) · later details only add facts (BR-07).
+BR-06) · later details only add facts (BR-07) · dispatch settings, waiting order, overload threshold, deadlines,
+YES/NO answers, SOS text and the auto-dispatch public-map rule (BR-160…BR-165).
 
 ---
 
@@ -208,7 +222,14 @@ backup.
 | M20 — no lock: a report can change while it is processed | 1: "never changes a report while it is being processed…" |
 | M21 — a follow-up SMS delivered twice is appended twice | 1: "plain words from any phone…" |
 
-Result: **21 of 21 breaks caught**. Apart from M7's knock-on failures, only the intended tests failed each time.
+| M22 — overload starts at the threshold instead of above it | 2: the BR-161 unit test and the overload API test |
+| M23 — a coordinator's assignment also expires | 1 after the unit test got a manual assignment with a deadline (first run: missed, because manual assignments never have a deadline) |
+| M24 — auto-dispatched incidents go public when accepted | 2: the BR-165 unit test and the public-map API test |
+| M25 — phone numbers must match exactly (breaks "yes" sent without +91) | 1: the SMS-answer test |
+| M26 — no dispatch pass after a decline | 1: the SMS-answer test |
+| M27 — a dead push token is kept | 1: the push test |
+
+Result: **27 of 27 breaks caught** (M23 on the second run). Apart from M7's knock-on failures, only the intended tests failed each time.
 M17–M21 (2026-09-30) were run with the full suite by a script that restores each file afterwards; the suite passed 114/114 after the last restore. M14–M16 (2026-09-30) were checked with the volunteer-registration group only (`vitest run tests/integration -t "Volunteer registration"`); the restored files were compared byte-for-byte with the backups.
 
 ---
@@ -224,6 +245,7 @@ M17–M21 (2026-09-30) were run with the full suite by a script that restores ea
 | Map radius in a real browser (2026-09-30) | Headless Chrome, the built app, a stand-in API with hazards 1, 4 and 8 km from a simulated GPS position | 5 km (default) showed 2 pins, the dashed circle and "1 more is farther than 5 km."; 2 km → 1; 10 km → 3; the choice survived a reload; Tamil on a 390 px phone fits with no sideways scrolling; with location denied all 3 showed with the note |
 | Volunteer registration screens in a real browser (2026-09-30) | Headless Chrome, real frontend, stand-in API on a spare port. Phone size (390 px): filled the form, attached an ID photo, sent. Laptop: `/admin/volunteers` | Form sent the expected fields (no GPS, area "Anna Nagar", JPEG proof) and showed "Application received"; no sideways scrolling. Admin page showed "Waiting for review (2)" with proof photos, and the Volunteers tab listed 2 volunteers with a WhatsApp link for the one with a phone |
 | "Send by SMS" in the Android app (2026-09-30) | Test build of the app with `VITE_SMS_NUMBER` = the emulator's own number, Android 14 emulator (headless), Wi-Fi and mobile data off, GPS set to Chennai | Report saved offline → the S03 card showed "Send by SMS" and "To +15555215554" → the tap opened Google Messages addressed to that number with the packed report; sent. The SMS store held `HG1 KGA5UP 6610 / G 13.08270 80.27070 / N RM / T Water entering our house. Grandmother cannot walk`, and `parseSmsReport` read that exact text back correctly. Seen: Android's WebView said "online" with no network, so the SMS button and the form hint no longer depend on that. Not tested: the emulator doesn't deliver SMS to itself, so the gateway leg was not run on a device; iPhone's `sms:` link |
+| Real SMS through a real gateway phone (2026-09-30) | Xiaomi 23122PCD1I (Android, HyperOS) with SMS Gateway for Android v1.76.0 on USB (`npm run sms:connect -- --usb`), the real server (`npm start`, local AI) and the real Supabase database; an SMS from an iPhone over the carrier network | "Water entering our house near the temple" → report `W2HDRF` (channel SMS, sender verified) → AI → incident `WY8D7`: FLOOD, MEDIUM (31), danger, Evacuation, place "near the temple" → the reply SMS was accepted and sent by the gateway (`ACTION_SENT`, OK). Problems found and fixed on the way: the app had no SMS permission (Android "restricted setting" for apps not from the Play Store; fixed on the phone); the Signing Key didn't match (401) — now set automatically by `sms:connect` through the app's `PATCH /settings`; the gateway retried the 401s and delivered once the key matched. Not tested yet: a packed "Send by SMS" message from the app on a real phone, and the later upload joining it on the real database |
 | Vite dev proxy adds no forwarding headers | Echo server on :3000 behind the Vite proxy | No `X-Forwarded-For`/`CF-Connecting-IP`/`Forwarded`, so the DEV "Reset demo data" button still works |
 
 ---
@@ -246,11 +268,13 @@ M17–M21 (2026-09-30) were run with the full suite by a script that restores ea
   `docs/scaling.md`.
 - **Live signals through a real Cloudflare tunnel:** not tested (TODO: needs verification). If the tunnel buffers
   streams, screens keep polling at the normal rate, because a stream counts as live only once bytes arrive.
-- **SMS through a real gateway phone:** TODO: needs verification. Run `supabase/schema.sql` again, set up SMS Gateway
-  for Android on a phone with a SIM, `npm run sms:connect` (or `-- --usb`), then text the gateway from another phone
-  (plain words) and send one "Send by SMS" report. Not measured: how many SMS per minute one gateway phone handles,
-  delivery time during a real network outage, the iPhone `sms:` link, and `sms:connect` itself (written from the
-  gateway's documented API, not run against a gateway yet).
+- **Auto-dispatch on devices (F28):** the SOS screen on a real volunteer phone, and a push notification with a real
+  Firebase project and the app closed. TODO: needs verification. Not measured: how Xiaomi and other battery savers
+  delay notifications.
+- **SMS through a real gateway phone:** a plain-words SMS worked end to end on 2026-09-30 (§5). Still TODO: needs
+  verification — a packed "Send by SMS" report from the app on a real phone and its later upload on the real
+  database, the `sms:connect` path without USB (ngrok), how many SMS per minute one gateway phone handles, delivery
+  time during a real network outage, and the iPhone `sms:` link.
 - **Rate limiting:** not implemented (owner decision for the hackathon). The 4-digit tracking PIN can therefore be
   guessed by repeated requests; see `docs/scaling.md` and `PROJECT.md` known limitations.
 

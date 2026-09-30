@@ -1,15 +1,16 @@
-// server/routes/volunteer.ts — /api/volunteer/* except chat (F15, F16). Transitions per BR-101…BR-104.
+// server/routes/volunteer.ts — /api/volunteer/* except chat (F15, F16). Transitions per BR-101…BR-104, applied by
+// server/dispatch.ts (shared with SMS answers, F28).
 import { Router } from 'express';
 import { effectivePriority } from '../../shared/scoring';
 import {
-  ACTIVE_ASSIGNMENT, ApiError, CHAT_OPEN_ASSIGNMENT, EQUIPMENT, SKILLS, UNABLE_REASONS, VEHICLES,
+  ACTIVE_ASSIGNMENT, ApiError, CHAT_OPEN_ASSIGNMENT, EQUIPMENT, SKILLS, VEHICLES,
   type AssignmentRecord, type AssignmentStatus, type IncidentRecord, type ProfileRecord, type VolunteerAssignment,
   type VolunteerProfile, type VolunteerProfilePatch,
 } from '../../shared/types';
-import { humanize } from '../../shared/volunteerMatch';
 import { currentUser, loadProfile, requireRole } from '../auth';
+import { applyVolunteerStatus } from '../dispatch';
 import { fromRows, toRow } from '../mappers';
-import { addLog, endAssignment, getIncident, recomputeIncident, releaseVolunteer, reportsOf, updateIncident } from '../pipeline';
+import { getIncident, reportsOf } from '../pipeline';
 import { openStream } from '../events';
 import { db } from '../supabase';
 import { ownAssignment } from './messages';
@@ -18,15 +19,6 @@ export const volunteerRouter = Router();
 volunteerRouter.use(requireRole('VOLUNTEER'));
 
 const RECENT_FINISHED = 5;
-
-/** BR-104 volunteer transitions. */
-const TRANSITIONS: Partial<Record<AssignmentStatus, AssignmentStatus[]>> = {
-  ASSIGNED: ['ACCEPTED', 'DECLINED'],
-  ACCEPTED: ['EN_ROUTE', 'ON_SITE', 'UNABLE'],
-  EN_ROUTE: ['ON_SITE', 'UNABLE'],
-  ON_SITE: ['ASSISTING', 'DONE', 'UNABLE'],
-  ASSISTING: ['DONE', 'UNABLE'],
-};
 
 const toProfile = (p: ProfileRecord): VolunteerProfile => ({
   id: p.id, name: p.name, skills: p.skills, equipment: p.equipment, vehicle: p.vehicle, availability: p.availability, lat: p.lat, lng: p.lng,
@@ -43,7 +35,7 @@ async function toVolunteerAssignment(a: AssignmentRecord, i?: IncidentRecord): P
   const incident = i ?? (await getIncident(a.incidentId));
   const reports = await reportsOf(incident.id);
   return {
-    id: a.id, status: a.status, reason: a.reason, updatedAt: a.updatedAt,
+    id: a.id, status: a.status, reason: a.reason, auto: !!a.auto, respondBy: a.respondBy ?? null, updatedAt: a.updatedAt,
     incident: {
       id: incident.id, code: incident.code, type: incident.type, summary: incident.summary, people: incident.people,
       vulnerable: incident.vulnerable, trapped: incident.trapped, medical: incident.medical, danger: incident.danger,
@@ -123,50 +115,24 @@ volunteerRouter.get('/assignments', async (req, res) => {
   res.json(await Promise.all([...active, ...finished].map((a) => toVolunteerAssignment(a))));
 });
 
+// POST /api/volunteer/push-token {token: string | null} — the app's Firebase push address, or null to stop (F28)
+volunteerRouter.post('/push-token', async (req, res) => {
+  const token = req.body?.token;
+  if (!(token === null || (typeof token === 'string' && token.length > 0 && token.length <= 4096))) {
+    throw new ApiError('VALIDATION', 'Push token is invalid.');
+  }
+  const { error } = await db.from('profiles').update({ push_token: token }).eq('id', currentUser(req).id);
+  if (error) throw new Error(`Profile update failed: ${error.message}`);
+  res.json({ ok: true });
+});
+
 // POST /api/volunteer/assignments/:id/status {status, reason?}
 volunteerRouter.post('/assignments/:id/status', async (req, res) => {
   const user = currentUser(req);
   const a = await ownAssignment(req.params.id, user.id);
   const status = req.body?.status as AssignmentStatus;
-  if (!TRANSITIONS[a.status]?.includes(status)) {
-    throw new ApiError('INVALID_STATE', 'This step is not possible right now. Refresh to see the latest status.');
-  }
-  const i = await getIncident(a.incidentId);
-
-  if (status === 'DECLINED' || status === 'UNABLE') {
-    const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
-    if (!reason) throw new ApiError('VALIDATION', 'Choose a reason.');
-    await endAssignment(a, status, reason);
-    const label = (UNABLE_REASONS as readonly string[]).includes(reason) ? humanize(reason) : reason;
-    await addLog(i.id, `Volunteer ${user.name} ${status === 'DECLINED' ? 'declined' : 'unable'}: ${label}`, false);
-  } else {
-    const { error } = await db.from('assignments').update({ status, updated_at: new Date().toISOString() }).eq('id', a.id);
-    if (error) throw new Error(`Assignment update failed: ${error.message}`);
-    if (status === 'ACCEPTED') {
-      const { error: busyError } = await db.from('profiles').update({ availability: 'BUSY' }).eq('id', user.id);
-      if (busyError) throw new Error(`Volunteer update failed: ${busyError.message}`);
-      await updateIncident(i.id, i.status === 'NEW' || i.status === 'VERIFIED' ? { status: 'IN_PROGRESS' } : {}); // BR-101
-      await addLog(i.id, 'A volunteer has accepted and is preparing to help', true);
-    } else if (status === 'EN_ROUTE') {
-      await updateIncident(i.id, {});
-      await addLog(i.id, 'Help is on the way', true);
-    } else if (status === 'ON_SITE') {
-      await addLog(i.id, 'Help has arrived', true);
-      if (!i.onSiteAt) {
-        await updateIncident(i.id, { onSiteAt: new Date().toISOString() });
-        await recomputeIncident(i.id);
-      } else {
-        await updateIncident(i.id, {});
-      }
-    } else if (status === 'ASSISTING') {
-      await updateIncident(i.id, {});
-      await addLog(i.id, 'Volunteer is helping on site', false);
-    } else if (status === 'DONE') {
-      await releaseVolunteer(user.id);
-      await updateIncident(i.id, {});
-      await addLog(i.id, 'The volunteer has completed their help', true);
-    }
-  }
+  const reason = typeof req.body?.reason === 'string' ? req.body.reason : null;
+  await applyVolunteerStatus(a, user, status, reason);
   const updated = await ownAssignment(a.id, user.id);
   res.json(await toVolunteerAssignment(updated));
 });

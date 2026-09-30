@@ -11,3 +11,8 @@ eval/results/
 
 # Android app build output (npm run app:apk)
 HopeGrid.apk
+
+# F28 Firebase push: the app config and the server key (service account) never go into git
+android/app/google-services.json
+secrets/
+*firebase-adminsdk*.json

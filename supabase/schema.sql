@@ -15,6 +15,7 @@ create table if not exists profiles (
   availability text not null default 'AVAILABLE',
   lat          double precision,
   lng          double precision,
+  push_token   text,                                -- F28: the volunteer app's push address (Firebase), if any
   created_at   timestamptz not null default now()
 );
 
@@ -51,6 +52,7 @@ create table if not exists incidents (
   reject_reason          text,
   possible_duplicate_of  uuid references incidents (id),
   merged_into            uuid references incidents (id),
+  auto_dispatched_at     timestamptz,             -- F28: first auto-dispatch; keeps it off the public map until verified or on site
   created_at             timestamptz not null default now(),
   updated_at             timestamptz not null default now()
 );
@@ -99,6 +101,8 @@ create table if not exists assignments (
   volunteer_id uuid not null references profiles (id),
   status       text not null,
   reason       text,
+  auto         boolean not null default false,       -- F28: sent by auto-dispatch (an SOS)
+  respond_by   timestamptz,                          -- F28: an SOS not answered by then counts as declined
   created_at   timestamptz not null default now(),
   updated_at   timestamptz not null default now()
 );
@@ -172,6 +176,18 @@ create table if not exists volunteer_applications (
 );
 create index if not exists volunteer_applications_status_idx on volunteer_applications (status);
 
+-- F28 auto-dispatch: coordinator settings (one row, key 'dispatch').
+create table if not exists settings (
+  key        text primary key,
+  value      jsonb not null,
+  updated_at timestamptz not null default now()
+);
+-- Databases created before F28: add its columns. Safe to run again.
+alter table profiles    add column if not exists push_token text;
+alter table incidents   add column if not exists auto_dispatched_at timestamptz;
+alter table assignments add column if not exists auto boolean not null default false;
+alter table assignments add column if not exists respond_by timestamptz;
+
 -- RLS on every table, no policies (architecture D6)
 alter table profiles      enable row level security;
 alter table incidents     enable row level security;
@@ -182,6 +198,7 @@ alter table resources     enable row level security;
 alter table allocations   enable row level security;
 alter table incident_logs enable row level security;
 alter table volunteer_applications enable row level security;
+alter table settings      enable row level security;
 
 -- The server's service-role key must reach these tables through the Data API
 -- (needed when the project does not auto-expose new tables).

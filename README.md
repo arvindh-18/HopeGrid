@@ -61,10 +61,26 @@ online again, its outbox uploads the photo, voice note and full text into the sa
 1. Run `supabase/schema.sql` again (it adds three columns to `reports`; safe to re-run).
 2. `.env`: `SMS_WEBHOOK_SECRET` (any long random text), `VITE_SMS_NUMBER` (the gateway phone's number), and for
    replies `SMS_GATEWAY_URL` / `SMS_GATEWAY_USER` / `SMS_GATEWAY_PASSWORD` (shown in the gateway app's Local Server).
-3. In the gateway app: Settings → Webhooks → Signing Key = the same `SMS_WEBHOOK_SECRET`.
+3. Gateway phone: install `app-release.apk` from the app's GitHub releases (not on the Play Store; in India Play
+   Protect blocks sideloaded SMS apps — turn "Scan apps with Play Protect" off for the install, then on again). Give
+   it the SMS permission: App info → App permissions → SMS → Allow; if it's grey, tap it once, then App info → ⋮ →
+   Allow restricted settings. Switch on Local Server. `sms:connect` sets its Signing Key for you.
 4. `npm start`, then `npm run sms:connect` (gateway phone reaches the ngrok address; it needs mobile data) or
    `npm run sms:connect -- --usb` (phone plugged in by USB with USB debugging on; also turn off "Require Internet
    connection" in the gateway app's webhook settings). Rebuild the website/app so it contains `VITE_SMS_NUMBER`.
+
+Auto-dispatch and SOS (F28): on the coordinator dashboard, **Auto-dispatch** can be Off, **When overloaded** (more
+than N incidents waiting) or **Always**. The system then offers each waiting incident, most urgent first, to the
+best-matched available volunteer. They get a full-screen SOS in the app, an SMS they can answer with YES or NO, and
+a push notification if Firebase is set up. No answer within the set minutes counts as a decline, and it goes to the
+next volunteer. Coordinators can still cancel or reassign, and auto-sent incidents stay off the public map until
+verified. After pulling this, run `supabase/schema.sql` again. Push notifications (optional):
+1. Firebase console → create a project → add an Android app with package `app.hopegrid` → download
+   `google-services.json` into `android/app/`.
+2. Project settings → Service accounts → Generate new private key → save it as `secrets/firebase-service-account.json`
+   and set `FIREBASE_SERVICE_ACCOUNT=./secrets/firebase-service-account.json` in `.env`. Both files are git-ignored.
+3. `npm run app:apk` (it prints "SOS push notifications: on"), install it on volunteers' phones, log in and allow
+   notifications. Restart `npm start`.
 
 Website on Vercel, server on this laptop: `vercel.json` makes Vercel serve the pages and forward `/api/*` to the
 laptop. Run `npm start`, then `npm run tunnel:vercel` (keep both open). It starts a Cloudflare quick tunnel and writes
@@ -121,4 +137,4 @@ Pages only call `src/data/index.ts` (`api`), which is backed by `src/data/realAp
 | **Measured but modest** | On synthetic reports the incident type is right 70% of the time (both sets); all fields right for only about a quarter of reports; Tamil is weak. See `docs/evaluation.md`. |
 | **Manual by design** | Volunteer ID check: a coordinator looks at the photo; nothing is checked automatically (no Aadhaar/DigiLocker lookup). |
 | **Simulated → manual** | WhatsApp alert to a volunteer: a "Send on WhatsApp" button prepares the message; the coordinator presses Send (automatic sending via the WhatsApp Business API is roadmap). |
-| **Not built (roadmap)** | Status-update SMS (only the receipt is sent back); a local database so the server works with no internet at all; automatic ID verification; email notice to applicants when they are approved or rejected; automatic WhatsApp notifications; rate limiting on the public endpoints; more than one server (live signals are in-process); a native-speaker review of the translations; testing with real users; a licence file. |
+| **Not built (roadmap)** | Push notifications on the website (only the Android app gets them); status-update SMS (only the receipt is sent back); a local database so the server works with no internet at all; automatic ID verification; email notice to applicants when they are approved or rejected; automatic WhatsApp notifications; rate limiting on the public endpoints; more than one server (live signals are in-process); a native-speaker review of the translations; testing with real users; a licence file. |

@@ -28,6 +28,7 @@ function adbPath(): string {
 }
 
 let gateway = process.env.SMS_GATEWAY_URL?.trim().replace(/\/+$/, '') ?? '';
+if (gateway && !/^https?:\/\//.test(gateway)) gateway = `http://${gateway}`; // the app shows the address without http://
 let target: string;
 if (usb) {
   const adb = adbPath();
@@ -85,9 +86,24 @@ for (const h of hooks) {
 if (!hooks.some((h) => h.event === 'sms:received' && h.url === target)) await gatewayApi('POST', '/webhooks', { url: target, event: 'sms:received' });
 console.log(`\nThe gateway phone now forwards every SMS it receives to ${target}`);
 
+// The app signs every webhook with its Signing Key; the server checks it with SMS_WEBHOOK_SECRET. Set it here so it
+// never has to be typed on the phone (PATCH /settings, checked with app v1.76.0). Over USB the phone also needs no
+// internet to deliver the webhook.
+let keySet = false;
+try {
+  await gatewayApi('PATCH', '/settings', { webhooks: { signing_key: process.env.SMS_WEBHOOK_SECRET!.trim(), ...(usb ? { internet_required: false } : {}) } });
+  keySet = true;
+  console.log(`Signing Key set to SMS_WEBHOOK_SECRET${usb ? ', and "Require Internet connection" turned off' : ''}.`);
+} catch { /* older app versions: set it by hand, below */ }
+
+if (!keySet) {
+  console.log(`
+Set these in the gateway app by hand (this app version has no settings API):
+  - Settings → Webhooks → Signing Key: paste the SMS_WEBHOOK_SECRET value from .env.${usb ? `
+  - Settings → Webhooks → turn OFF "Require Internet connection".` : ''}`);
+}
 console.log(`
-Two settings in the gateway app, once:
-  1. Settings → Webhooks → Signing Key: paste the SMS_WEBHOOK_SECRET value from .env.${usb ? `
-  2. Settings → Webhooks → turn OFF "Require Internet connection".` : ''}
+The app also needs the SMS permission (App info → App permissions → SMS → Allow; if it is grey: tap it once, then
+App info → ⋮ → Allow restricted settings).
 Then send any SMS to the gateway phone's number: it should appear on the coordinator dashboard with an "SMS" tag.
 The HopeGrid app shows "Send by SMS" only when it was built with VITE_SMS_NUMBER (that phone's number) in .env.`);

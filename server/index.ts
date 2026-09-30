@@ -8,7 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { ApiError, type ErrorCode } from '../shared/types';
 import { loadAiModel } from './ai';
 import { appCors } from './cors';
-import { checkSchema, processPendingReports } from './pipeline';
+import { runDispatch, startDispatcher } from './dispatch';
+import { checkSchema, onReportProcessed, processPendingReports } from './pipeline';
 import { adminRouter } from './routes/admin';
 import { applicationsRouter } from './routes/applications';
 import { authRouter } from './routes/authRoutes';
@@ -84,6 +85,9 @@ app.listen(port, () => {
     (e) => console.warn(`${name} unavailable: ${e instanceof Error ? e.message : e}`),
   );
   checkSchema().catch((e) => console.warn(e instanceof Error ? e.message : e));
+  // Auto-dispatch (F28): answer deadlines and the queue every DISPATCH_TICK_MS, and right after each processed report.
+  onReportProcessed(() => void runDispatch());
+  startDispatcher();
   if (process.env.SMS_WEBHOOK_SECRET?.trim()) console.log('SMS reports on: POST /api/sms/incoming');
   Promise.all([warm('AI model', loadAiModel), warm('Speech model', loadWhisper)])
     .then(processPendingReports)

@@ -191,8 +191,12 @@ export default function IncidentPage() {
               <div className="flex flex-col gap-3">
                 <div className="flex items-center justify-between gap-3 rounded-[12px] bg-canvas px-4 py-3">
                   <div>
-                    <p className="font-medium text-ink">{activeAsg.volunteerName}</p>
-                    <p className="t-caption">Updated {timeAgo(activeAsg.updatedAt)}</p>
+                    <p className="font-medium text-ink">{activeAsg.volunteerName}{activeAsg.auto && <span className="t-caption ml-2">Auto-dispatch</span>}</p>
+                    <p className="t-caption">
+                      {activeAsg.auto && activeAsg.status === 'ASSIGNED' && activeAsg.respondBy
+                        ? `SOS sent · must answer by ${clockTime(activeAsg.respondBy)}, then it goes to the next volunteer`
+                        : `Updated ${timeAgo(activeAsg.updatedAt)}`}
+                    </p>
                   </div>
                   <AssignmentBadge status={activeAsg.status} />
                 </div>

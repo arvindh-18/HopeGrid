@@ -33,6 +33,14 @@ export const MAX_REPORT_TEXT = 2000;        // report text, including follow-up 
 export const SMS_FOLLOWUP_MINUTES = 60;     // a plain SMS from the same number within this time adds to its report
 export const SMS_REPLY_TIMEOUT_MS = 10_000;
 
+// F28 auto-dispatch (BR-160…BR-166). Mode, threshold and answer time are set by coordinators; these are defaults/limits.
+export const DISPATCH_DEFAULT_THRESHOLD = 5;        // OVERLOAD: more than this many incidents waiting
+export const DISPATCH_DEFAULT_RESPONSE_MINUTES = 3; // an SOS must be answered within this time
+export const DISPATCH_MAX_THRESHOLD = 100;
+export const DISPATCH_MAX_RESPONSE_MINUTES = 30;
+export const DISPATCH_TICK_MS = 15_000;             // how often the server checks answer deadlines and the queue
+export const PUSH_TIMEOUT_MS = 10_000;
+
 export const OUTBOX_RETRY_MS = 15_000;
 export const POLL_ADMIN_MS = 5_000;
 export const POLL_VOLUNTEER_MS = 5_000;

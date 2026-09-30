@@ -1,11 +1,15 @@
-// S07 Admin dashboard — priority counters, filters and the incident queue (features.md F12, BR-120).
+// S07 Admin dashboard — priority counters, auto-dispatch switch (F28), filters and the incident queue (features.md F12,
+// BR-120).
 import { useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { POLL_ADMIN_MS } from '../../../shared/constants';
-import { INCIDENT_TYPES, PRIORITY_LEVELS, type IncidentListItem, type IncidentStatus, type IncidentType } from '../../../shared/types';
+import { DISPATCH_MAX_RESPONSE_MINUTES, DISPATCH_MAX_THRESHOLD, POLL_ADMIN_MS } from '../../../shared/constants';
+import {
+  ApiError, INCIDENT_TYPES, PRIORITY_LEVELS,
+  type DispatchMode, type DispatchSettings, type IncidentListItem, type IncidentStatus, type IncidentType,
+} from '../../../shared/types';
 import { ConfidenceBadge, PriorityBadge, StatusBadge, Tag } from '../../components/Badges';
 import { Layout } from '../../components/Layout';
-import { EmptyState, ErrorState, FreshnessLine, LoadingBlock, PageHeader, timeAgo } from '../../components/ui';
+import { Button, EmptyState, ErrorState, Field, FreshnessLine, LoadingBlock, PageHeader, timeAgo, useToast } from '../../components/ui';
 import { api } from '../../data';
 import { usePoll } from '../../hooks/usePoll';
 import { PRIORITY_LABEL, TYPE_ICON, TYPE_LABEL } from '../../lib/labels';
@@ -73,6 +77,8 @@ export default function Dashboard() {
               </div>
             ))}
           </section>
+
+          <DispatchPanel />
 
           <section className="flex flex-col gap-3 lg:flex-row lg:items-center" aria-label="Filters">
             <div className="flex gap-1 overflow-x-auto rounded-full bg-white p-1" role="group" aria-label="Status">
@@ -179,4 +185,85 @@ function Flags({ i, fresh }: { i: IncidentListItem; fresh: boolean }) {
   ].filter(Boolean);
   if (flags.length === 0) return <span className="t-caption">—</span>;
   return <div className="flex flex-wrap gap-1.5">{flags}</div>;
+}
+
+const MODES: { value: DispatchMode; label: string }[] = [
+  { value: 'OFF', label: 'Off' },
+  { value: 'OVERLOAD', label: 'When overloaded' },
+  { value: 'ALWAYS', label: 'Always' },
+];
+
+/** F28 — coordinators choose when the system sends volunteers by itself (BR-160…BR-162). */
+function DispatchPanel() {
+  const toast = useToast();
+  const q = usePoll(() => api.getDispatch(), POLL_ADMIN_MS);
+  const [draft, setDraft] = useState<DispatchSettings | null>(null);
+  const [saving, setSaving] = useState(false);
+  if (!q.data) return null;
+  const saved = q.data.settings;
+  const s = draft ?? saved;
+  const dirty = draft !== null && JSON.stringify(draft) !== JSON.stringify(saved);
+  const set = (patch: Partial<DispatchSettings>) => setDraft({ ...s, ...patch });
+  const num = (v: string) => (/^\d+$/.test(v) ? Number(v) : 0);
+  const { waiting, pendingOffers } = q.data;
+
+  const status = saved.mode === 'OFF'
+    ? 'Off: coordinators assign every volunteer.'
+    : saved.mode === 'ALWAYS'
+      ? 'On: every waiting incident is sent to the best-matched volunteer.'
+      : waiting > saved.threshold
+        ? `Overloaded (${waiting} waiting, more than ${saved.threshold}): sending volunteers automatically.`
+        : `Standing by: starts when more than ${saved.threshold} incidents are waiting (${waiting} now).`;
+
+  async function save() {
+    setSaving(true);
+    try {
+      q.setData(await api.saveDispatch(s));
+      setDraft(null);
+      toast(s.mode === 'OFF' ? 'Auto-dispatch is off' : 'Auto-dispatch saved');
+    } catch (e) {
+      toast(e instanceof ApiError ? e.message : 'Could not save. Try again.', 'error');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className={`card card-pad flex flex-col gap-4 ${saved.mode !== 'OFF' ? 'ring-2 ring-ink' : ''}`} aria-labelledby="dispatch-h">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 id="dispatch-h" className="t-title-sm">Auto-dispatch</h2>
+          <p className="mt-1 t-body-sm text-muted">{status}{pendingOffers > 0 && ` ${pendingOffers} SOS ${pendingOffers === 1 ? 'is' : 'are'} waiting for an answer.`}</p>
+        </div>
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Auto-dispatch mode">
+          {MODES.map((m) => (
+            <button key={m.value} type="button" className="chip" aria-pressed={s.mode === m.value} onClick={() => set({ mode: m.value })}>{m.label}</button>
+          ))}
+        </div>
+      </div>
+      {s.mode !== 'OFF' && (
+        <div className="flex flex-wrap items-end gap-4">
+          {s.mode === 'OVERLOAD' && (
+            <Field label="Start when more incidents are waiting than" htmlFor="dispatch-threshold">
+              <input id="dispatch-threshold" className="input w-28" type="number" inputMode="numeric" min={1} max={DISPATCH_MAX_THRESHOLD} value={s.threshold || ''} onChange={(e) => set({ threshold: num(e.target.value) })} />
+            </Field>
+          )}
+          <Field label="Volunteer must answer within (minutes)" htmlFor="dispatch-minutes">
+            <input id="dispatch-minutes" className="input w-28" type="number" inputMode="numeric" min={1} max={DISPATCH_MAX_RESPONSE_MINUTES} value={s.responseMinutes || ''} onChange={(e) => set({ responseMinutes: num(e.target.value) })} />
+          </Field>
+        </div>
+      )}
+      {s.mode !== 'OFF' && (
+        <p className="t-caption">
+          The best-matched available volunteer gets an SOS in the app, by SMS and as a notification. No answer in time counts as a decline and it goes to the next volunteer. You can cancel or reassign at any time; auto-sent incidents stay off the public map until you verify them or the volunteer arrives.
+        </p>
+      )}
+      {dirty && (
+        <div className="flex gap-2">
+          <Button size="sm" busy={saving} onClick={save}>Save</Button>
+          <Button size="sm" variant="outline" disabled={saving} onClick={() => setDraft(null)}>Undo</Button>
+        </div>
+      )}
+    </section>
+  );
 }

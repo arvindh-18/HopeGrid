@@ -1,4 +1,5 @@
-// S09 Volunteer home — availability, new requests, current assignment, skills (features.md F10, F16).
+// S09 Volunteer home — availability, new requests, the SOS screen for auto-dispatched requests (F28), current
+// assignment, skills (features.md F10, F16).
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { POLL_VOLUNTEER_MS } from '../../../shared/constants';
@@ -15,6 +16,7 @@ import { api } from '../../data';
 import { useAuth } from '../../hooks/useAuth';
 import { usePoll } from '../../hooks/usePoll';
 import { formatDistance, getPosition } from '../../lib/geo';
+import { startPush } from '../../lib/push';
 import { distanceBetween } from '../../../shared/linking';
 import {
   AVAILABILITY_LABEL, EQUIPMENT_LABEL, NEED_LABEL, SKILL_LABEL, TYPE_ICON, TYPE_LABEL, UNABLE_LABEL, VEHICLE_LABEL,
@@ -33,6 +35,16 @@ export default function VolunteerHome() {
   const offers = asg.data?.filter((a) => a.status === 'ASSIGNED') ?? [];
   const current = asg.data?.find((a) => ACTIVE_ASSIGNMENT.includes(a.status) && a.status !== 'ASSIGNED') ?? null;
   const recent = asg.data?.filter((a) => !ACTIVE_ASSIGNMENT.includes(a.status)) ?? [];
+
+  // F28: SOS notifications while the app is closed (Android app with Firebase only). The token goes to the server.
+  useEffect(() => {
+    let stop: (() => void) | undefined;
+    void startPush((token) => void api.registerPushToken(token).catch(() => {}), (path) => navigate(path)).then((s) => { stop = s; });
+    return () => stop?.();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // F28: an auto-dispatched request covers the screen until it is accepted or declined.
+  const sos = offers.find((o) => o.auto && o.respondBy) ?? null;
 
   // Alert when a new request arrives (F16).
   const seenOffers = useRef<Set<string> | null>(null);
@@ -164,6 +176,12 @@ export default function VolunteerHome() {
         )}
       </div>
 
+      {sos && p && !declining && (
+        <SosScreen
+          a={sos} p={p} busy={busyId === sos.id}
+          onAccept={() => respond(sos, 'ACCEPTED')} onDecline={() => setDeclining(sos)} onTimeUp={() => void asg.refresh()}
+        />
+      )}
       {declining && (
         <ReasonPicker title="Decline this request?" confirm="Decline" busy={busyId === declining.id} onClose={() => setDeclining(null)} onConfirm={(r) => respond(declining, 'DECLINED', r)} />
       )}
@@ -276,5 +294,42 @@ function SkillsModal({ p, onClose, onSaved }: { p: VolunteerProfile; onClose: ()
         {error && <Notice tone="danger">{error}</Notice>}
       </div>
     </Modal>
+  );
+}
+
+const secondsUntil = (iso: string) => Math.max(0, Math.ceil((Date.parse(iso) - Date.now()) / 1000));
+
+/** F28 — an SOS from auto-dispatch. No close button: it goes away only by Accept, Decline or the deadline (BR-162). */
+function SosScreen({ a, p, busy, onAccept, onDecline, onTimeUp }: {
+  a: VolunteerAssignment; p: VolunteerProfile; busy: boolean; onAccept: () => void; onDecline: () => void; onTimeUp: () => void;
+}) {
+  const [left, setLeft] = useState(() => secondsUntil(a.respondBy!));
+  useEffect(() => {
+    navigator.vibrate?.([400, 200, 400, 200, 400]);
+    const t = setInterval(() => {
+      const s = secondsUntil(a.respondBy!);
+      setLeft(s);
+      if (s === 0) onTimeUp(); // the server moves it to the next volunteer within a few seconds
+    }, 1000);
+    return () => clearInterval(t);
+  }, [a.id, a.respondBy]); // eslint-disable-line react-hooks/exhaustive-deps
+  const mm = String(Math.floor(left / 60)).padStart(2, '0');
+  const ss = String(left % 60).padStart(2, '0');
+  return (
+    <div role="alertdialog" aria-modal="true" aria-labelledby="sos-h" aria-describedby="sos-d" className="fixed inset-0 z-[1400] flex flex-col bg-danger text-white">
+      <div className="mx-auto flex w-full max-w-xl flex-1 flex-col gap-4 overflow-y-auto px-5 pt-8">
+        <p className="t-caption !text-white/80">SOS · sent automatically</p>
+        <h2 id="sos-h" className="t-title-lg">Someone needs your help</h2>
+        <p className="font-display text-[56px] leading-none tabular-nums" aria-live="polite">{mm}:{ss}</p>
+        <p id="sos-d" className="t-body-sm !text-white/90">
+          {left > 0 ? 'Accept or decline before the time runs out. If you do not answer, it goes to the next volunteer.' : 'Time is up. It is going to the next volunteer.'}
+        </p>
+        <div className="rounded-[16px] bg-white p-4 text-ink"><IncidentSummary a={a} p={p} /></div>
+      </div>
+      <div className="mx-auto flex w-full max-w-xl flex-col gap-2 px-5 pb-6 pt-4">
+        <Button variant="lime" size="lg" block busy={busy} onClick={onAccept}>Accept</Button>
+        <Button variant="outline" size="lg" block disabled={busy} className="!border-white !bg-transparent !text-white" onClick={onDecline}>Decline</Button>
+      </div>
+    </div>
   );
 }

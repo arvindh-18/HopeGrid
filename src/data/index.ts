@@ -4,7 +4,7 @@ import type {
   ChatMessage, ChatThread, IncidentDetail, IncidentListItem, IncidentPatch, OutgoingMessage, PriorityLevel,
   PublicIncident, ReportSubmission, Resource, ResourceInput, SessionUser, TrackView, UnableReason,
   AssignmentStatus, VolunteerAssignment, VolunteerProfile, VolunteerProfilePatch,
-  ApplicationStatus, VolunteerApplication, VolunteerApplicationInput, VolunteerListItem,
+  ApplicationStatus, VolunteerApplication, VolunteerApplicationInput, VolunteerListItem, DispatchSettings, DispatchState,
 } from '../../shared/types';
 import { realApi } from './realApi';
 
@@ -35,6 +35,8 @@ export interface Api {
   assignVolunteer(id: string, volunteerId: string): Promise<IncidentDetail>;
   cancelAssignment(assignmentId: string): Promise<IncidentDetail>;
   allocateResource(id: string, resourceId: string, quantity: number): Promise<IncidentDetail>;
+  getDispatch(): Promise<DispatchState>;
+  saveDispatch(settings: DispatchSettings): Promise<DispatchState>;
   listResources(): Promise<Resource[]>;
   createResource(r: ResourceInput): Promise<Resource>;
   updateResource(id: string, patch: Partial<ResourceInput>): Promise<Resource>;
@@ -44,6 +46,8 @@ export interface Api {
   listMyAssignments(): Promise<VolunteerAssignment[]>;
   updateAssignmentStatus(id: string, status: AssignmentStatus, reason?: UnableReason | string): Promise<VolunteerAssignment>;
   getAssignmentChat(id: string): Promise<{ open: boolean; threads: ChatThread[] }>;
+  /** F28: this device's push address for SOS notifications (null stops them). */
+  registerPushToken(token: string | null): Promise<{ ok: true }>;
   sendVolunteerMessage(id: string, reportId: string, msg: OutgoingMessage): Promise<ChatMessage>;
   // Volunteer registration (F26)
   applyAsVolunteer(input: VolunteerApplicationInput): Promise<{ ok: true }>;

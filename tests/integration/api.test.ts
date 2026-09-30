@@ -1,7 +1,10 @@
 // tests/integration/api.test.ts — API-level tests: real Express routers, real pipeline and business rules, with
 // Supabase replaced by an in-memory fake built from supabase/schema.sql, and the LLM / Whisper replaced by stubs
 // (rules.md AR-31: tests never call the LLM, Whisper or Supabase).
-import { createHmac, randomUUID } from 'node:crypto';
+import { createHmac, createVerify, generateKeyPairSync, randomUUID } from 'node:crypto';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../server/supabase', async () => (await import('./fakeSupabase')).supabaseModule);
@@ -9,9 +12,11 @@ vi.mock('node-llama-cpp', async () => (await import('./stubs')).nodeLlamaCppStub
 vi.mock('../../server/transcribe', async () => (await import('./stubs')).transcribeStub);
 vi.mock('../../server/scripts/seed', () => ({ runSeed: vi.fn(async () => {}) }));
 
+import { runDispatch } from '../../server/dispatch';
 import { openStreamCount } from '../../server/events';
 import { submissionToReportRow } from '../../server/mappers';
 import { processPendingReports, queueState } from '../../server/pipeline';
+import { resetPush } from '../../server/push';
 import { applyCleanup, planCleanup } from '../../server/scripts/cleanup';
 import { runSeed } from '../../server/scripts/seed';
 import { CODE_ALPHABET, DEMO_CENTER, DEMO_OTP } from '../../shared/constants';
@@ -1062,5 +1067,184 @@ describe('Reports by SMS (F27, BR-06, BR-07)', () => {
     expect((await sms(received('+919840033333', 'Water is at the second step now'))).body.outcome).toBe('ADDED');
     expect((await processed(smsReport.id)).text).toContain('second step');
     expect(server.errors).toEqual([]);
+  });
+});
+
+// ------------------------------------------------------------------------------------------------ F28 auto-dispatch
+
+describe('Auto-dispatch and SOS to volunteers (F28, BR-160…BR-166)', () => {
+  const SECRET = 'test-sms-secret';
+  const GATEWAY = 'http://gateway.test:8080';
+  let sms: { to: string; text: string }[];
+  let pushes: { token: string; title: string; body: string; auth: string }[];
+  let fcmStatus: number;
+
+  const setDispatch = (mode: string, threshold = 5, responseMinutes = 3) => adminCall('PUT', '/dispatch', { mode, threshold, responseMinutes });
+  const offersOf = (who: Staff) => table('assignments').filter((a) => a.volunteer_id === who.id);
+  /** A second incident far enough away not to be a duplicate. */
+  const elsewhere = (n: number, over: Partial<ReportSubmission> = {}) => submission({ lat: DEMO_CENTER.lat + 0.05 * n, locationText: `Street ${n}`, ...over });
+  const smsFrom = (from: string, message: string) => {
+    const body = { event: 'sms:received', payload: { messageId: randomUUID(), message, sender: from, receivedAt: new Date().toISOString() } };
+    const ts = String(Math.floor(Date.now() / 1000));
+    return server.call('POST', '/sms/incoming', body, { headers: { 'x-timestamp': ts, 'x-signature': createHmac('sha256', SECRET).update(JSON.stringify(body) + ts).digest('hex') } });
+  };
+
+  beforeEach(() => {
+    process.env.SMS_WEBHOOK_SECRET = SECRET;
+    process.env.SMS_GATEWAY_URL = GATEWAY;
+    sms = [];
+    pushes = [];
+    fcmStatus = 200;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      const u = String(url);
+      if (u === `${GATEWAY}/message`) {
+        const b = JSON.parse(String(init?.body));
+        sms.push({ to: b.phoneNumbers[0], text: b.textMessage.text });
+        return new Response(null, { status: 202 });
+      }
+      if (u === 'https://oauth2.googleapis.com/token') return Response.json({ access_token: 'google-token', expires_in: 3600 });
+      if (u.startsWith('https://fcm.googleapis.com/v1/projects/hopegrid-test/messages:send')) {
+        const b = JSON.parse(String(init?.body));
+        pushes.push({ token: b.message.token, title: b.message.notification.title, body: b.message.notification.body, auth: String((init?.headers as Record<string, string>).Authorization) });
+        return fcmStatus === 200 ? Response.json({ name: 'ok' }) : Response.json({ error: { status: 'NOT_FOUND', details: [{ errorCode: 'UNREGISTERED' }] } }, { status: 404 });
+      }
+      throw new Error(`unexpected fetch ${u}`);
+    });
+  });
+  afterEach(() => {
+    delete process.env.SMS_WEBHOOK_SECRET;
+    delete process.env.SMS_GATEWAY_URL;
+    delete process.env.FIREBASE_SERVICE_ACCOUNT;
+    resetPush();
+    vi.mocked(globalThis.fetch).mockRestore();
+  });
+
+  it('is off by default; only coordinators can change it, and bad values are refused (BR-160)', async () => {
+    expect((await adminCall('GET', '/dispatch')).body).toEqual({ settings: { mode: 'OFF', threshold: 5, responseMinutes: 3 }, waiting: 0, pendingOffers: 0 });
+    expect((await server.call('PUT', '/admin/dispatch', { mode: 'ALWAYS', threshold: 5, responseMinutes: 3 }, { token: ravi.token })).status).toBe(403);
+    expect((await setDispatch('SOMETIMES')).status).toBe(400);
+    expect((await setDispatch('OVERLOAD', 0)).status).toBe(400);
+    expect((await setDispatch('OVERLOAD', 5, 31)).status).toBe(400);
+    expect((await setDispatch('OVERLOAD', 2, 4)).body.settings).toEqual({ mode: 'OVERLOAD', threshold: 2, responseMinutes: 4 });
+    expect((await adminCall('GET', '/dispatch')).body.settings).toEqual({ mode: 'OVERLOAD', threshold: 2, responseMinutes: 4 });
+    await submit();
+    await runDispatch();
+    expect(table('assignments')).toHaveLength(0); // 1 waiting is not more than 2
+  });
+
+  it('when overloaded, sends the most urgent incidents to the best-matched volunteers with an answer deadline (BR-161, BR-164)', async () => {
+    await setDispatch('OVERLOAD', 2);
+    const road = await submit(elsewhere(1, { text: 'A fallen tree is blocking the road' }));
+    const road2 = await submit(elsewhere(2, { text: 'Another tree fell across the lane' }));
+    await runDispatch();
+    expect(table('assignments')).toHaveLength(0); // 2 waiting: not more than 2
+
+    const flood = await submit(); // trapped + grandmother: the most urgent
+    const before = Date.now();
+    await runDispatch();
+    const offers = table('assignments');
+    expect(offers).toHaveLength(2); // two volunteers, three incidents: the least urgent keeps waiting
+    const floodOffer = offers.find((a) => a.incident_id === flood.incident.id)!;
+    expect(floodOffer).toMatchObject({ volunteer_id: ravi.id, status: 'ASSIGNED', auto: true }); // swimmer with a life jacket
+    expect(Date.parse(floodOffer.respond_by) - before).toBeGreaterThanOrEqual(3 * 60_000 - 1000);
+    expect(offers.some((a) => a.volunteer_id === priya.id)).toBe(true);
+    expect(one('incidents', flood.incident.id).auto_dispatched_at).toBeTruthy();
+    expect(logsOf(flood.incident.id).map((l) => l.text)).toContainEqual(expect.stringMatching(/^Auto-dispatch \(3 incidents waiting, more than 2\): SOS sent to Ravi/));
+    const waitingOne = [road, road2].find((r) => !offers.some((a) => a.incident_id === r.incident.id))!;
+    expect(logsOf(waitingOne.incident.id).map((l) => l.text)).toContain('Auto-dispatch: no available volunteer yet');
+
+    // SOS by SMS to the volunteer's own number, with the code to answer.
+    await vi.waitFor(() => expect(sms.find((m) => m.to === ravi.phone)?.text).toMatch(new RegExp(`^HopeGrid SOS #${flood.incident.code}: Flood, .*Reply YES ${flood.incident.code}`)));
+    // The volunteer app gets it as an SOS with its deadline; the coordinator sees it as an automatic one.
+    const mine = (await volunteerCall(ravi, 'GET', '/assignments')).body[0];
+    expect(mine).toMatchObject({ status: 'ASSIGNED', auto: true, respondBy: floodOffer.respond_by });
+    expect((await adminCall('GET', `/incidents/${flood.incident.id}`)).body.assignments[0]).toMatchObject({ auto: true, status: 'ASSIGNED' });
+    expect((await adminCall('GET', '/dispatch')).body).toMatchObject({ waiting: 1, pendingOffers: 2 });
+  });
+
+  it('no answer in time counts as a decline and the SOS moves to the next volunteer; a late accept is refused (BR-162)', async () => {
+    await setDispatch('ALWAYS');
+    const { incident } = await submit();
+    await runDispatch();
+    const first = offersOf(ravi)[0];
+    expect(first.status).toBe('ASSIGNED');
+
+    await fakeDb.from('assignments').update({ respond_by: new Date(Date.now() - 1000).toISOString() }).eq('id', first.id);
+    await runDispatch();
+    expect(one('assignments', first.id)).toMatchObject({ status: 'DECLINED', reason: 'No answer in time' });
+    expect(offersOf(priya)[0]).toMatchObject({ incident_id: incident.id, status: 'ASSIGNED', auto: true });
+    expect(logsOf(incident.id).map((l) => l.text)).toContain('Auto-dispatch: Ravi did not answer in time');
+    expect((await setStatus(ravi, first.id, 'ACCEPTED')).status).toBe(409);
+
+    // Priya accepts in time: the incident is in progress and she is busy.
+    expect((await setStatus(priya, offersOf(priya)[0].id, 'ACCEPTED')).status).toBe(200);
+    expect(one('incidents', incident.id).status).toBe('IN_PROGRESS');
+    expect(one('profiles', priya.id).availability).toBe('BUSY');
+    expect(server.errors).toEqual([]);
+  });
+
+  it('volunteers can answer the SOS by SMS: YES accepts, NO declines and it moves on (BR-163)', async () => {
+    await setDispatch('ALWAYS');
+    const a = await submit();
+    await runDispatch();
+    const yes = await smsFrom(ravi.phone.replace('+91', ''), 'yes'); // without the country code still matches
+    expect(yes.body).toEqual({ ok: true, outcome: 'ANSWER' });
+    expect(offersOf(ravi)[0].status).toBe('ACCEPTED');
+    expect(one('profiles', ravi.id).availability).toBe('BUSY');
+    expect(one('incidents', a.incident.id).status).toBe('IN_PROGRESS');
+    await vi.waitFor(() => expect(sms.find((m) => m.to.endsWith(ravi.phone.slice(-10)) && m.text.includes('you accepted'))).toBeTruthy());
+
+    const b = await submit(elsewhere(1, { text: 'Wall collapsed on a house, one person injured' }));
+    await runDispatch();
+    const offer = offersOf(priya).find((x) => x.incident_id === b.incident.id)!;
+    expect(offer.status).toBe('ASSIGNED');
+    expect((await smsFrom(priya.phone, `NO ${b.incident.code}`)).body.outcome).toBe('ANSWER');
+    expect(one('assignments', offer.id)).toMatchObject({ status: 'DECLINED', reason: 'Declined by SMS' });
+    await vi.waitFor(() => expect(logsOf(b.incident.id).map((l) => l.text)).toContain('Auto-dispatch: no available volunteer yet')); // Ravi is busy
+    expect(table('reports')).toHaveLength(2); // the answers did not become reports
+
+    // Nothing waiting for Priya now: the reply says so.
+    expect((await smsFrom(priya.phone, 'yes')).body.outcome).toBe('ANSWER');
+    await vi.waitFor(() => expect(sms.some((m) => m.to === priya.phone && m.text.includes('no request is waiting'))).toBe(true));
+  });
+
+  it('keeps an auto-dispatched incident off the public map until a coordinator verifies it (BR-165)', async () => {
+    await setDispatch('ALWAYS');
+    const { incident } = await submit();
+    await runDispatch();
+    await setStatus(ravi, offersOf(ravi)[0].id, 'ACCEPTED');
+    expect(one('incidents', incident.id).status).toBe('IN_PROGRESS');
+    expect((await server.call('GET', '/public/incidents')).body.incidents).toHaveLength(0);
+    await adminCall('POST', `/incidents/${incident.id}/verify`, {});
+    expect((await server.call('GET', '/public/incidents')).body.incidents.map((i: { code: string }) => i.code)).toEqual([incident.code]);
+  });
+
+  it('with Firebase configured, also sends the SOS as a push notification and forgets a dead token (BR-164)', async () => {
+    const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+    const dir = mkdtempSync(join(tmpdir(), 'hopegrid-push-'));
+    const keyFile = join(dir, 'service-account.json');
+    writeFileSync(keyFile, JSON.stringify({ project_id: 'hopegrid-test', client_email: 'push@hopegrid-test.iam.gserviceaccount.com', private_key: privateKey.export({ type: 'pkcs8', format: 'pem' }) }));
+    process.env.FIREBASE_SERVICE_ACCOUNT = keyFile;
+    resetPush();
+
+    expect((await volunteerCall(ravi, 'POST', '/push-token', { token: 'device-token-1' })).status).toBe(200);
+    expect((await volunteerCall(ravi, 'POST', '/push-token', { token: 42 })).status).toBe(400);
+    await setDispatch('ALWAYS');
+    const { incident } = await submit();
+    await runDispatch();
+    await vi.waitFor(() => expect(pushes).toHaveLength(1));
+    expect(pushes[0]).toMatchObject({ token: 'device-token-1', title: `SOS #${incident.code}: help needed`, auth: 'Bearer google-token' });
+    // The Google sign-in was signed with the service account's key.
+    const tokenCall = vi.mocked(globalThis.fetch).mock.calls.find(([u]) => String(u) === 'https://oauth2.googleapis.com/token')!;
+    const jwt = new URLSearchParams(String(tokenCall[1]!.body)).get('assertion')!.split('.');
+    expect(createVerify('RSA-SHA256').update(`${jwt[0]}.${jwt[1]}`).verify(publicKey, Buffer.from(jwt[2], 'base64url'))).toBe(true);
+
+    // The app was uninstalled: Firebase says UNREGISTERED and the token is forgotten.
+    fcmStatus = 404;
+    await fakeDb.from('assignments').update({ respond_by: new Date(Date.now() - 1000).toISOString() }).eq('volunteer_id', ravi.id);
+    await volunteerCall(priya, 'POST', '/push-token', { token: 'device-token-2' });
+    await runDispatch(); // Ravi timed out; Priya gets it
+    await vi.waitFor(() => expect(one('profiles', priya.id).push_token).toBeNull());
+    expect(one('profiles', ravi.id).push_token).toBe('device-token-1');
   });
 });

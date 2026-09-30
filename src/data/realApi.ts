@@ -66,6 +66,8 @@ export const realApi: Api = {
   assignVolunteer: (incidentId, volunteerId) => post(`/admin/incidents/${id(incidentId)}/assign`, { volunteerId }),
   cancelAssignment: (assignmentId) => post(`/admin/assignments/${id(assignmentId)}/cancel`),
   allocateResource: (incidentId, resourceId, quantity) => post(`/admin/incidents/${id(incidentId)}/allocate`, { resourceId, quantity }),
+  getDispatch: () => get('/admin/dispatch'),
+  saveDispatch: (settings) => request('PUT', '/admin/dispatch', settings),
   listResources: () => get('/admin/resources'),
   createResource: (r) => post('/admin/resources', r),
   updateResource: (resourceId, p) => patch(`/admin/resources/${id(resourceId)}`, p),
@@ -75,6 +77,7 @@ export const realApi: Api = {
   listMyAssignments: () => get('/volunteer/assignments'),
   updateAssignmentStatus: (assignmentId, status, reason) => post(`/volunteer/assignments/${id(assignmentId)}/status`, { status, reason }),
   getAssignmentChat: (assignmentId) => get(`/volunteer/assignments/${id(assignmentId)}/chat`),
+  registerPushToken: (token) => post('/volunteer/push-token', { token }),
   sendVolunteerMessage: (assignmentId, reportId, msg) => post(`/volunteer/assignments/${id(assignmentId)}/chat`, { reportId, ...msg }),
   // Volunteer registration (F26)
   applyAsVolunteer: (input) => post('/volunteer-applications', input),

@@ -35,14 +35,23 @@ Background for every item is in `PROJECT.md` (kept in ~/Downloads) and in `CHANG
       `completed_at` to `reports` (safe to re-run; nothing is deleted). Until then the server prints a warning at
       startup and the coordinator dashboard can't load.
 
+### Auto-dispatch (F28)
+- [ ] **Run `supabase/schema.sql` again** (adds `assignments.auto` / `respond_by`, `incidents.auto_dispatched_at`,
+      `profiles.push_token` and the `settings` table). Then restart `npm start`.
+- [ ] On the dashboard, try **Auto-dispatch → Always** with one test report: the volunteer phone should show the SOS
+      screen and get the SOS SMS; answer YES by SMS.
+- [ ] Optional push: create the Firebase project (README → "Auto-dispatch and SOS"), add `google-services.json` and
+      the service-account key, `npm run app:apk`, and check an SOS arrives with the app closed.
+
 ### Reports by SMS (F27)
 - [ ] Get an Android phone with a SIM for the gateway. Install "SMS Gateway for Android" and switch on Local Server.
 - [ ] Fill in `.env`: `VITE_SMS_NUMBER` (the gateway's number), and `SMS_GATEWAY_URL` / `_USER` / `_PASSWORD` from
       the app. `SMS_WEBHOOK_SECRET` is already generated: paste the same value into the app (Settings → Webhooks →
       Signing Key). On Vercel, add `VITE_SMS_NUMBER` under Environment Variables.
 - [ ] `npm start`, then `npm run sms:connect` (or `-- --usb` with a cable). Rebuild: `npm run build`, `npm run app:apk`.
-- [ ] Test: text plain words to the gateway from another phone, then a "Send by SMS" report with mobile data off,
-      then turn data on and check the photo/voice note join the same report.
+- [x] Plain-words SMS from another phone → incident + reply (worked 2026-09-30, Xiaomi gateway on USB).
+- [ ] A "Send by SMS" report from the rebuilt app with mobile data off, then turn data on and check the photo/voice
+      note join the same report.
 
 ### Running the app
 - [ ] **Restart the dev server.** Stop the old Vite still running on port 5173 (started 09:26), then run `npm run dev`.

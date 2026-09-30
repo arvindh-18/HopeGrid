@@ -119,7 +119,8 @@ hopegrid/
 │   ├── volunteerMatch.ts
 │   ├── publicView.ts
 │   ├── trackingStatus.ts
-│   └── sms.ts                    (F27 SMS format)
+│   ├── sms.ts                    (F27 SMS format)
+│   └── dispatch.ts               (F28 auto-dispatch rules)
 ├── server/
 │   ├── index.ts
 │   ├── supabase.ts
@@ -130,6 +131,9 @@ hopegrid/
 │   ├── transcribe.ts
 │   ├── pipeline.ts
 │   ├── events.ts                 (live change signals, D12)
+│   ├── dispatch.ts               (F28 auto-dispatch + shared assignment steps)
+│   ├── push.ts                   (F28 Firebase push, FCM HTTP v1)
+│   ├── smsGateway.ts             (sends SMS through the gateway phone)
 │   ├── routes/
 │   │   ├── victim.ts
 │   │   ├── public.ts
@@ -166,7 +170,8 @@ hopegrid/
 │   │   ├── media.ts
 │   │   ├── geo.ts
 │   │   ├── labels.ts
-│   │   └── sms.ts                (F27: gateway number, sms: link)
+│   │   ├── sms.ts                (F27: gateway number, sms: link)
+│   │   └── push.ts               (F28: SOS notifications in the Android app)
 │   ├── components/
 │   │   ├── Layout.tsx
 │   │   ├── Badges.tsx
@@ -227,6 +232,7 @@ hopegrid/
 | publicView.ts | `isPublic`, `toPublicIncident`, `adviceFor`, `markerColor`. | BR-80…BR-84 |
 | trackingStatus.ts | `victimStep` (internal state → victim step). | BR-90 |
 | sms.ts | `encodeSmsReport` (phone) and `parseSmsReport` (server): the one-SMS report format. | BR-06 |
+| dispatch.ts | `checkDispatchSettings`, `waitingIncidents`, `incidentsToDispatch`, `expiredOffers`, `parseVolunteerReply`, `sosSummary`/`sosSms`/`sosPush`. | BR-160…BR-164 |
 
 **server/**
 
@@ -241,7 +247,10 @@ hopegrid/
 | transcribe.ts | `transcribe(storagePath): Promise<{text, language, english}>` — download audio, ffmpeg → 16 kHz mono PCM, whisper.cpp in-process (language auto); non-English speech also translated to English (BR-12). Timeout 60 s. Throws on failure. |
 | pipeline.ts | `processReport(reportId)`, `recomputeIncident(incidentId)`, `processPendingReports()`, `changeReport(id, change)` (BR-07: change a stored report only while it is not being processed, then queue it again), `checkSchema()` (startup warning when schema.sql needs re-running). Implements §11.2. |
 | routes/victim.ts | `/api/reports` (also completes a report that came by SMS, BR-07), `/api/track`, `/api/track/verify-phone`. |
-| routes/sms.ts | `POST /api/sms/incoming` (F27, BR-06): checks the gateway's signature or bearer secret, turns packed or plain-word SMS into reports, adds follow-ups, replies through the gateway. Mounted before the JSON parser (the signature covers the raw body). |
+| dispatch.ts | F28: dispatch settings; `createAssignment` and `applyVolunteerStatus` (BR-100…BR-104, used by coordinators, volunteers and SMS answers); `answerBySms` (BR-163); `runDispatch` (expire deadlines, send SOS offers) and `startDispatcher` (every DISPATCH_TICK_MS). |
+| push.ts | F28: `sendPush(token, …)` via FCM HTTP v1, signing the Google token from FIREBASE_SERVICE_ACCOUNT with node:crypto. Off without it. |
+| smsGateway.ts | `sendSms(to, text)` through the gateway phone's Local Server API (F27 replies, F28 SOS). |
+| routes/sms.ts | `POST /api/sms/incoming` (F27, BR-06; volunteers' YES/NO answers first, BR-163): checks the gateway's signature or bearer secret, turns packed or plain-word SMS into reports, adds follow-ups, replies through the gateway. Mounted before the JSON parser (the signature covers the raw body). |
 | routes/public.ts | `/api/public/incidents`. |
 | events.ts | In-process change signals: `emitChange({incidentId, reportId?, volunteerId?})` (called on every incident update, log, report link/finish, chat message and assignment), merged per `STREAM_COALESCE_MS`; `openStream(res, pick)` writes a Server-Sent Events stream with a ping every `STREAM_PING_MS`. |
 | routes/authRoutes.ts | `/api/auth/login`, `/api/auth/me`. Login without a profile row → 401; the message says "waiting for approval" when a PENDING volunteer application exists (BR-150). |
@@ -273,6 +282,7 @@ hopegrid/
 | lib/geo.ts | `getPosition()` with 10 s timeout; `distanceMeters()` (re-export of shared if needed). |
 | lib/labels.ts | Enum → display text, colors, icons. |
 | lib/sms.ts | F27: `SMS_NUMBER` (from `VITE_SMS_NUMBER`), `smsHref(number, body)`. |
+| lib/push.ts | F28: `startPush(save, onOpen)` with @capacitor/push-notifications, only in app builds with `VITE_PUSH_ENABLED`. |
 | components/Layout.tsx | Header, nav per role, offline banner, emergency number banner on public pages. |
 | components/Badges.tsx | PriorityBadge, ConfidenceBadge, StatusBadge. |
 | components/ReasonList.tsx | Renders `Reason[]` ("+20 · 2 independent reports"). |
@@ -387,6 +397,10 @@ Conventions: `id uuid primary key default gen_random_uuid()` unless stated; `cre
 | channel | text | no | `APP` \| `SMS` (F27), default APP |
 | pending_media | text[] | no | SMS reports: `PHOTO` / `AUDIO` still on the phone (BR-07) |
 | completed_at | timestamptz | yes | SMS reports: when the phone's full upload arrived (BR-07) |
+
+F28 adds: `assignments.auto` (boolean, default false) and `assignments.respond_by` (timestamptz), `incidents.auto_dispatched_at`
+(timestamptz), `profiles.push_token` (text), and a `settings` table (`key` text PK, `value` jsonb, `updated_at`) holding
+the dispatch settings under key `dispatch`.
 | created_at | timestamptz | no | time on the phone (SMS: time received) |
 | received_at | timestamptz | no | server time, default now() |
 
@@ -538,6 +552,16 @@ TrackView = { code, step: VictimStep, updatedAt, messages: {at, text}[],   // pu
 | Method | Path | Request | Response |
 |---|---|---|---|
 | POST | /sms/incoming | SMS Gateway for Android webhook `{event: "sms:received", payload: {message, sender, messageId, receivedAt}}` signed with `X-Signature` + `X-Timestamp`, or `{from, text}` with `Authorization: Bearer <SMS_WEBHOOK_SECRET>` | `{ok:true, outcome: SmsOutcome, code?}` (CREATED \| ADDED \| ALREADY_RECEIVED \| IGNORED); 401 wrong signature/secret; 404 while `SMS_WEBHOOK_SECRET` is empty; 500 (retry) while the report is being processed |
+
+**Auto-dispatch** (F28)
+
+| Method | Path | Request | Response |
+|---|---|---|---|
+| GET | /admin/dispatch | — | `DispatchState` `{settings: {mode, threshold, responseMinutes}, waiting, pendingOffers}` |
+| PUT | /admin/dispatch | `DispatchSettings` | `DispatchState`; 400 VALIDATION (BR-160) |
+| POST | /volunteer/push-token | `{token: string \| null}` | `{ok:true}` |
+
+`VolunteerAssignment` and `IncidentDetail.assignments[]` also carry `auto` and `respondBy`.
 
 **Public**
 
@@ -699,6 +723,8 @@ Errors are thrown as `ApiError {code, message}` in both implementations.
 | SMS_WEBHOOK_SECRET | server | long random text | F27: turns on `/api/sms/incoming`; same value as the gateway app's webhook Signing Key |
 | SMS_GATEWAY_URL / SMS_GATEWAY_USER / SMS_GATEWAY_PASSWORD | server | http://192.168.1.20:8080 | F27 replies: the gateway app's Local Server address and login (USB: http://127.0.0.1:8080) |
 | VITE_SMS_NUMBER | frontend | +919840000000 | F27: the gateway phone's number; "Send by SMS" is hidden without it |
+| FIREBASE_SERVICE_ACCOUNT | server | ./secrets/firebase-service-account.json | F28 push: the Firebase service-account key file (git-ignored). Empty = no push |
+| VITE_PUSH_ENABLED | frontend (app) | 1 | set by `npm run app:apk` when `android/app/google-services.json` exists |
 | PUBLIC_SERVER_URL / NGROK_AUTHTOKEN | scripts | https://name.ngrok-free.dev | ngrok address (`tunnel:ngrok`, `app:apk`, `sms:connect`) |
 
 In Supabase project settings set **JWT expiry = 86400 seconds** so staff tokens last the whole demo.

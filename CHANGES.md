@@ -276,6 +276,31 @@ whenever the phone has signal, even without mobile data.
     sent, and the server's parser reads that exact message correctly
   - **Not yet run:** a real gateway phone, and the live database (it needs `schema.sql` re-run first)
 
+## Auto-dispatch and SOS to volunteers (2026-10-01, F28)
+
+- **Coordinator switch** on the dashboard: Off / When overloaded (more than N waiting) / Always, plus the answer time.
+  It's stored in a new `settings` table.
+- **The system sends the best-matched volunteer** (existing ranking), most urgent incidents first, one offer per
+  volunteer at a time.
+- **SOS in three ways:**
+  - a full-screen SOS in the app, with a countdown and only Accept / Decline;
+  - an SMS through the gateway phone (answer YES or NO with the code);
+  - a Firebase push notification in the Android app, so it arrives even when the app is closed.
+- **No answer in time** counts as a decline, and the incident goes to the next volunteer. Status changes are now
+  compare-and-set, so a late answer and the deadline can't both win.
+- **Humans stay in charge:** every step is logged; coordinators can cancel or reassign; auto-sent incidents stay off
+  the public map until verified or the volunteer is on site (BR-165). The AI still never assigns (AR-20).
+- **Code:**
+  - new: `shared/dispatch.ts`, `server/dispatch.ts`, `server/push.ts`, `server/smsGateway.ts`, `src/lib/push.ts`;
+  - the assignment steps moved from the volunteer route into `server/dispatch.ts`, so the app and SMS answers share
+    them.
+- **New package:** `@capacitor/push-notifications` 6.0.5 (approved). The server calls Firebase over HTTP, so it needs
+  no Firebase package.
+- **Database:** `assignments.auto`, `assignments.respond_by`, `incidents.auto_dispatched_at`, `profiles.push_token` and
+  the `settings` table. Re-run `schema.sql`; the server warns at startup if they're missing.
+- **Evidence:** 127 tests pass (13 new); type-check clean; 6 deliberate breaks, all caught (one after tightening a test).
+  Not yet on devices: the SOS screen on a real phone, and push with a real Firebase project.
+
 ## Only you can do these
 
 - **Rotate the Supabase keys.**

@@ -342,7 +342,7 @@ Row text: "<Type label> · <distance> away · <X min earlier|later>". Sort by di
 
 ## B7. Public view
 
-**BR-80 Visible incidents:** incidents with coordinates AND one of:
+**BR-80 Visible incidents:** incidents with coordinates AND one of (auto-dispatched incidents: see also BR-165):
 - status ∈ {VERIFIED, IN_PROGRESS};
 - status RESOLVED with `resolved_at` within `PUBLIC_RESOLVED_HOURS`.
 
@@ -502,6 +502,50 @@ Availability: a volunteer may set AVAILABLE or OFFLINE only while they have no A
 - No SMS is sent. The "Demo code" hint is shown only in DEV builds or when DEV_MODE is on.
 - A report that arrived by SMS is already verified: the network delivered it from that number (BR-06).
 
+## B12. Auto-dispatch and SOS (F28)
+
+AR-20 is unchanged: the **AI** never assigns. Auto-dispatch is a coordinator-controlled rule that uses the existing
+matching (BR-60…BR-63).
+
+**BR-160 Settings and the waiting list.** One stored setting (`settings.key = 'dispatch'`): `mode` OFF | OVERLOAD |
+ALWAYS (default OFF), `threshold` 1…DISPATCH_MAX_THRESHOLD (default DISPATCH_DEFAULT_THRESHOLD), `responseMinutes`
+1…DISPATCH_MAX_RESPONSE_MINUTES (default DISPATCH_DEFAULT_RESPONSE_MINUTES). Only ADMIN reads or changes it; anything
+else → `VALIDATION`. **Waiting** incidents = status NEW or VERIFIED with no assignment in ACTIVE_ASSIGNMENT, ordered as
+the dashboard (BR-120).
+
+**BR-161 When the system sends a volunteer.** A dispatch pass runs every DISPATCH_TICK_MS, after each processed report,
+after a volunteer declines, and when the settings are saved. OFF: nothing. ALWAYS: every waiting incident. OVERLOAD:
+every waiting incident, but only while more than `threshold` are waiting. For each, in order, the top volunteer from
+`rankVolunteers` (BR-60 eligibility, so a volunteer gets one offer at a time and never one they declined) gets an
+assignment ASSIGNED with `auto = true` and `respond_by = now + responseMinutes`; the incident's `auto_dispatched_at`
+is set (first time only). Log (A) "Auto-dispatch (<why>): SOS sent to <name>, <score>/100; answer within N min". No
+eligible volunteer → log (A) "Auto-dispatch: no available volunteer yet" once, and it keeps waiting.
+
+**BR-162 Answer deadline.** An auto assignment still ASSIGNED at `respond_by` becomes DECLINED with reason "No answer
+in time" (BR-104 effects), log (A) "Auto-dispatch: <name> did not answer in time", and the next pass offers it to the
+next volunteer. Coordinator assignments have no deadline. Every status change is compare-and-set on the status the
+caller saw, so a late answer and the deadline can't both win: the loser gets `INVALID_STATE`.
+
+**BR-163 Answer by SMS.** An SMS to the gateway from a volunteer's phone number (last 10 digits compared) that reads
+YES / Y / ACCEPT or NO / N / DECLINE, optionally followed by the 5-character incident code, answers their open offer
+(the one with that code, or their only one). YES → ACCEPTED (BR-101, BR-104), NO → DECLINED "Declined by SMS". The
+reply SMS confirms it, or says no request is waiting / which codes to use. Such an SMS never becomes a report; any
+other SMS is handled by BR-06.
+
+**BR-164 How the SOS reaches the volunteer.** (1) In the app: a full-screen SOS with a countdown to `respond_by` and
+only Accept / Decline (Decline needs a reason, BR-104). (2) SMS through the gateway, if the volunteer has a phone:
+"HopeGrid SOS #<code>: <type>, <priority> priority, <facts> at <place>, <distance> away. Reply YES <code> … NO <code>
+… within N min." (3) A push notification when the server has FIREBASE_SERVICE_ACCOUNT and the volunteer's app has
+registered a token; a token Firebase reports as UNREGISTERED is deleted. SMS and push are best effort; no reporter
+name or number is ever included (AR-23).
+
+**BR-165 Public map.** An IN_PROGRESS incident with `auto_dispatched_at` set is public only once `verified_at` or
+`on_site_at` is set (a coordinator checked it, or the volunteer reached the place). A coordinator's manual assignment
+clears `auto_dispatched_at`.
+
+**BR-166 Coordinators stay in charge.** Auto-dispatch only creates assignments. It never verifies, rejects, merges,
+escalates or resolves. Coordinators can cancel any assignment (BR-104), reassign, or switch it OFF at any time.
+
 ## B11. Volunteer registration
 
 **BR-150 Volunteer applications (F26):**
@@ -534,6 +578,10 @@ Availability: a volunteer may set AVAILABLE or OFFLINE only while they have no A
 | MAX_REPORT_TEXT (report text incl. follow-up SMS) | 2000 |
 | SMS_FOLLOWUP_MINUTES (BR-06) | 60 |
 | SMS_REPLY_TIMEOUT_MS | 10_000 |
+| DISPATCH_DEFAULT_THRESHOLD / DISPATCH_MAX_THRESHOLD (BR-160) | 5 / 100 |
+| DISPATCH_DEFAULT_RESPONSE_MINUTES / DISPATCH_MAX_RESPONSE_MINUTES (BR-160) | 3 / 30 |
+| DISPATCH_TICK_MS (BR-161) | 15_000 |
+| PUSH_TIMEOUT_MS | 10_000 |
 | POLL_RESOURCES_MS / POLL_RESOURCE_PICKER_MS | 30_000 / 60_000 |
 | POLL_FALLBACK_MS (polling while a live change stream is connected) | 30_000 |
 | STREAM_PING_MS / STREAM_COALESCE_MS / STREAM_RETRY_MS / STREAM_RETRY_MAX_MS | 25_000 / 100 / 3_000 / 30_000 |

@@ -93,7 +93,9 @@ export async function releaseVolunteer(volunteerId: string): Promise<void> {
 
 /** Ends an active assignment as DECLINED / UNABLE / CANCELLED with BR-102 + BR-104 side effects. */
 export async function endAssignment(a: AssignmentRecord, status: 'DECLINED' | 'UNABLE' | 'CANCELLED', reason: string | null): Promise<void> {
-  check(await db.from('assignments').update({ status, reason, updated_at: nowIso() }).eq('id', a.id), 'Assignment update failed');
+  // Only from the status the caller saw: an SOS deadline (F28) and the volunteer's answer can't overwrite each other.
+  const ended = check(await db.from('assignments').update({ status, reason, updated_at: nowIso() }).eq('id', a.id).eq('status', a.status).select('id'), 'Assignment update failed');
+  if (!ended?.length) throw new ApiError('INVALID_STATE', 'This assignment has just changed. Refresh to see the latest status.');
   await releaseVolunteer(a.volunteerId);
   const i = await getIncident(a.incidentId);
   await updateIncident(i.id, i.status === 'IN_PROGRESS' ? { status: i.verifiedAt ? 'VERIFIED' : 'NEW' } : {});
@@ -126,6 +128,12 @@ const RETRY_DELAYS_MS = [5_000, 30_000, 120_000]; // after a failed attempt; lat
 const SWEEP_MS = 10 * 60_000;
 const MAX_ATTEMPTS = 10; // per server run; a restart gives a report fresh attempts
 
+/** Called after each report finishes processing (F28: the dispatcher looks at the queue at once). */
+let processedHook: (() => void) | null = null;
+export function onReportProcessed(fn: (() => void) | null): void {
+  processedHook = fn;
+}
+
 const waiting: string[] = [];
 const inFlight = new Set<string>();
 const failures = new Map<string, number>(); // report id → failed attempts in this run
@@ -157,9 +165,16 @@ export async function changeReport(reportId: string, change: () => Promise<void>
 
 /** At startup: say so plainly when the database is missing columns added by a newer schema.sql. */
 export async function checkSchema(): Promise<void> {
-  const { error } = await db.from('reports').select('channel, pending_media, completed_at').limit(1);
-  if (error && /column|schema cache/i.test(error.message)) {
-    throw new Error(`The database is missing new columns (${error.message}). Run supabase/schema.sql again in the Supabase SQL editor: it is safe to re-run.`);
+  const checks = await Promise.all([
+    db.from('reports').select('channel, pending_media, completed_at').limit(1), // F27
+    db.from('assignments').select('auto, respond_by').limit(1), // F28
+    db.from('incidents').select('auto_dispatched_at').limit(1),
+    db.from('profiles').select('push_token').limit(1),
+    db.from('settings').select('key').limit(1),
+  ]);
+  const missing = checks.map((c) => c.error?.message).filter((m): m is string => !!m && /column|schema cache|relation|does not exist/i.test(m));
+  if (missing.length) {
+    throw new Error(`The database is missing new tables or columns (${missing.join('; ')}). Run supabase/schema.sql again in the Supabase SQL editor: it is safe to re-run.`);
   }
 }
 
@@ -275,6 +290,7 @@ export async function processReport(reportId: string): Promise<void> {
       check(await db.from('reports').update({ processing_status: 'DONE' }).eq('id', r.id), 'Report update failed');
       emitChange({ incidentId: r.incidentId, reportId: r.id });
       failures.delete(r.id);
+      processedHook?.();
       return;
     }
 
@@ -321,6 +337,7 @@ export async function processReport(reportId: string): Promise<void> {
     check(await db.from('reports').update({ processing_status: 'DONE' }).eq('id', r.id), 'Report update failed');
     emitChange({ incidentId, reportId: r.id }); // the victim's step moves on from "Report received"
     failures.delete(r.id);
+    processedHook?.();
   } catch (e) {
     console.error(`Processing report ${reportId} failed:`, e);
     // Best effort: during a database outage this write fails too, and the report simply stays PENDING.

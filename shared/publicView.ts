@@ -13,6 +13,9 @@ export interface PublicSourceIncident {
   publicArea: string | null;
   verifiedAt: string | null;
   resolvedAt: string | null;
+  /** F28: set when auto-dispatch sent a volunteer; no coordinator has looked at it yet. */
+  autoDispatchedAt?: string | null;
+  onSiteAt?: string | null;
   confidence: number;
   effectivePriority: PriorityLevel;
   reportCount: number;
@@ -26,7 +29,10 @@ export interface PublicSourceIncident {
  */
 export function isPublic(i: PublicSourceIncident, now: Date = new Date()): boolean {
   if (i.lat === null || i.lng === null) return false;
-  if (i.status === 'VERIFIED' || i.status === 'IN_PROGRESS') return true;
+  if (i.status === 'VERIFIED') return true;
+  // IN_PROGRESS: a coordinator sent a volunteer. When the system sent one (auto-dispatch, BR-165), no person has
+  // judged the report yet: wait until a coordinator verifies it or the volunteer reaches the place.
+  if (i.status === 'IN_PROGRESS') return !i.autoDispatchedAt || !!i.verifiedAt || !!i.onSiteAt;
   if (i.status === 'RESOLVED' && i.resolvedAt) {
     return now.getTime() - new Date(i.resolvedAt).getTime() <= PUBLIC_RESOLVED_HOURS * 3_600_000;
   }

@@ -6,6 +6,9 @@ import { rankVolunteers, type MatchVolunteer } from '../shared/volunteerMatch';
 import { isPublic, markerColor, toPublicIncident, withinRadius } from '../shared/publicView';
 import { victimStep } from '../shared/trackingStatus';
 import { encodeSmsReport, parseSmsReport } from '../shared/sms';
+import {
+  checkDispatchSettings, expiredOffers, incidentsToDispatch, parseVolunteerReply, sosPush, sosSms, sosSummary, waitingIncidents,
+} from '../shared/dispatch';
 import { humanize } from '../shared/volunteerMatch';
 import { DEMO_CENTER, SMS_LOCATION_MAX_CHARS, SMS_TEXT_MAX_CHARS } from '../shared/constants';
 import type { Extraction } from '../shared/types';
@@ -185,6 +188,12 @@ describe('BR-80 public view', () => {
     expect(isPublic({ ...src, status: 'VERIFIED', verifiedAt: minsAgo(1) }, now)).toBe(true);
     expect(isPublic({ ...src, status: 'IN_PROGRESS' }, now)).toBe(true); // a volunteer was sent: a coordinator acted
   });
+  it('keeps an auto-dispatched incident off the map until a coordinator verifies it or the volunteer arrives (BR-165)', () => {
+    const auto = { ...src, status: 'IN_PROGRESS' as const, autoDispatchedAt: minsAgo(5) };
+    expect(isPublic(auto, now)).toBe(false);
+    expect(isPublic({ ...auto, verifiedAt: minsAgo(1) }, now)).toBe(true);
+    expect(isPublic({ ...auto, onSiteAt: minsAgo(1) }, now)).toBe(true);
+  });
   it('shows RESOLVED incidents only for a few hours, and never REJECTED or MERGED ones', () => {
     expect(isPublic({ ...src, status: 'RESOLVED', resolvedAt: minsAgo(60) }, now)).toBe(true);
     expect(isPublic({ ...src, status: 'RESOLVED', resolvedAt: minsAgo(7 * 60) }, now)).toBe(false);
@@ -300,5 +309,73 @@ describe('BR-07 later details only add facts', () => {
     // A hazard type replaces a situation type (as in a merge, BR-50), and a larger count wins.
     expect(laterFacts(incident({ type: 'PEOPLE_TRAPPED', people: 2 }), extraction({ type: 'LANDSLIDE', people: 6 }), humanize).patch)
       .toEqual({ type: 'LANDSLIDE', people: 6 });
+  });
+});
+
+describe('F28 auto-dispatch rules (BR-160…BR-164)', () => {
+  it('checks the settings a coordinator sends (BR-160)', () => {
+    expect(checkDispatchSettings({ mode: 'OVERLOAD', threshold: 5, responseMinutes: 3 })).toEqual({ mode: 'OVERLOAD', threshold: 5, responseMinutes: 3 });
+    expect(typeof checkDispatchSettings({ mode: 'SOMETIMES', threshold: 5, responseMinutes: 3 })).toBe('string');
+    expect(typeof checkDispatchSettings({ mode: 'ALWAYS', threshold: 0, responseMinutes: 3 })).toBe('string');
+    expect(typeof checkDispatchSettings({ mode: 'ALWAYS', threshold: 2.5, responseMinutes: 3 })).toBe('string');
+    expect(typeof checkDispatchSettings({ mode: 'ALWAYS', threshold: 5, responseMinutes: 31 })).toBe('string');
+    expect(typeof checkDispatchSettings(null)).toBe('string');
+  });
+
+  const inc = (id: string, over: Record<string, unknown> = {}) => ({
+    id, status: 'NEW' as const, priority: 'MEDIUM' as const, priorityOverride: null, escalationRecommended: false, escalatedAt: null,
+    createdAt: minsAgo(10), ...over,
+  }) as Parameters<typeof waitingIncidents>[0][number];
+
+  it('lists waiting incidents most urgent first, like the dashboard (BR-160, BR-120)', () => {
+    const list = [
+      inc('old-medium', { createdAt: minsAgo(30) }),
+      inc('new-medium'),
+      inc('critical', { priority: 'CRITICAL' }),
+      inc('overridden-high', { priority: 'LOW', priorityOverride: 'HIGH' }),
+      inc('escalate', { escalationRecommended: true }),
+      inc('verified', { status: 'VERIFIED', priority: 'LOW' }),
+      inc('busy', { priority: 'CRITICAL' }),
+      inc('in-progress', { status: 'IN_PROGRESS', priority: 'CRITICAL' }),
+      inc('resolved', { status: 'RESOLVED', priority: 'CRITICAL' }),
+    ];
+    const asg = [{ incidentId: 'busy', status: 'ASSIGNED' as const }, { incidentId: 'old-medium', status: 'DECLINED' as const }];
+    expect(waitingIncidents(list, asg).map((i) => i.id)).toEqual(['critical', 'overridden-high', 'escalate', 'old-medium', 'new-medium', 'verified']);
+  });
+
+  it('dispatches nothing when off, everything when always, and only above the threshold when overloaded (BR-161)', () => {
+    const three = ['a', 'b', 'c'];
+    expect(incidentsToDispatch({ mode: 'OFF', threshold: 1, responseMinutes: 3 }, three)).toEqual([]);
+    expect(incidentsToDispatch({ mode: 'ALWAYS', threshold: 99, responseMinutes: 3 }, three)).toEqual(three);
+    expect(incidentsToDispatch({ mode: 'OVERLOAD', threshold: 3, responseMinutes: 3 }, three)).toEqual([]);
+    expect(incidentsToDispatch({ mode: 'OVERLOAD', threshold: 2, responseMinutes: 3 }, three)).toEqual(three);
+  });
+
+  it('expires only unanswered SOS offers past their deadline, never a coordinator\'s assignment (BR-162)', () => {
+    const a = (id: string, over: Record<string, unknown>) => ({ id, status: 'ASSIGNED' as const, auto: true, respondBy: minsAgo(1), ...over });
+    const list = [
+      a('late', {}), a('in-time', { respondBy: new Date(now.getTime() + 60_000).toISOString() }),
+      a('manual', { auto: false, respondBy: null }), a('manual-with-deadline', { auto: false }), a('accepted', { status: 'ACCEPTED' }),
+    ];
+    expect(expiredOffers(list as never[], now).map((x: { id: string }) => x.id)).toEqual(['late']);
+  });
+
+  it('reads a volunteer\'s YES / NO answer, with or without the incident code (BR-163)', () => {
+    expect(parseVolunteerReply('yes')).toEqual({ answer: 'ACCEPT', code: null });
+    expect(parseVolunteerReply(' Yes. ')).toEqual({ answer: 'ACCEPT', code: null });
+    expect(parseVolunteerReply('YES WF22W')).toEqual({ answer: 'ACCEPT', code: 'WF22W' });
+    expect(parseVolunteerReply('no #wf22w')).toEqual({ answer: 'DECLINE', code: 'WF22W' });
+    expect(parseVolunteerReply('N')).toEqual({ answer: 'DECLINE', code: null });
+    expect(parseVolunteerReply('yes please')).toBeNull();
+    expect(parseVolunteerReply('YES WF22')).toBeNull(); // not a 5-character code
+    expect(parseVolunteerReply('Water near Yes Street')).toBeNull();
+  });
+
+  it('writes a short SOS with the facts, the place and how to answer, and nothing about the reporter (BR-164)', () => {
+    const i = { code: 'WF22W', type: 'FLOOD' as const, priority: 'CRITICAL' as const, people: 3, trapped: true, medical: false, vulnerable: true, locationText: 'Canal Road, near the temple' };
+    const summary = sosSummary(i, '1.2 km', humanize);
+    expect(summary).toBe('Flood, Critical priority, 3 people, trapped, vulnerable person at Canal Road, near the temple, 1.2 km away');
+    expect(sosSms(i, summary, 3)).toBe(`HopeGrid SOS #WF22W: ${summary}. Reply YES WF22W to accept or NO WF22W to decline within 3 min.`);
+    expect(sosPush(i, summary, 3)).toEqual({ title: 'SOS #WF22W: help needed', body: `${summary}. Accept or decline within 3 min.` });
   });
 });

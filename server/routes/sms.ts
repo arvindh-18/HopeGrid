@@ -7,12 +7,14 @@ import { createHash, createHmac, randomInt, timingSafeEqual } from 'node:crypto'
 import express, { Router, type Request } from 'express';
 import {
   CODE_ALPHABET, EMERGENCY_NUMBER, MAX_REPORT_TEXT, PHONE_MAX_DIGITS, PHONE_MIN_DIGITS, PIN_LENGTH, REPORT_CODE_LENGTH,
-  SMS_FOLLOWUP_MINUTES, SMS_REPLY_TIMEOUT_MS,
+  SMS_FOLLOWUP_MINUTES,
 } from '../../shared/constants';
 import { clip, parseSmsReport } from '../../shared/sms';
 import { ACTIVE_STATUSES, ApiError, type ReportRecord, type SmsOutcome, type SmsReport } from '../../shared/types';
+import { answerBySms } from '../dispatch';
 import { fromRow, toRow } from '../mappers';
 import { addLog, changeReport, enqueueReport, getIncident } from '../pipeline';
+import { sendSms } from '../smsGateway';
 import { db } from '../supabase';
 
 export const smsRouter = Router();
@@ -62,24 +64,6 @@ function readIncoming(body: unknown): IncomingSms | null {
   const text = str(b.text);
   if (from === null || text === null) throw new ApiError('VALIDATION', 'Send {from, text}.');
   return { from, text, messageId: null, receivedAt: null };
-}
-
-/** Replies through the gateway phone (Local Server API). Best effort: a failed reply is logged, the report is saved. */
-async function sendSms(to: string, text: string): Promise<void> {
-  const base = process.env.SMS_GATEWAY_URL?.trim().replace(/\/+$/, '');
-  if (!base) return;
-  const auth = Buffer.from(`${process.env.SMS_GATEWAY_USER ?? ''}:${process.env.SMS_GATEWAY_PASSWORD ?? ''}`).toString('base64');
-  try {
-    const res = await fetch(`${base}/message`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Basic ${auth}` },
-      body: JSON.stringify({ textMessage: { text }, phoneNumbers: [to] }),
-      signal: AbortSignal.timeout(SMS_REPLY_TIMEOUT_MS),
-    });
-    if (!res.ok) console.warn(`SMS reply to …${to.slice(-4)} failed: the gateway answered ${res.status}`);
-  } catch (e) {
-    console.warn(`SMS reply to …${to.slice(-4)} failed: ${e instanceof Error ? e.message : e}`);
-  }
 }
 
 // ---------------------------------------------------------------- reports from SMS (BR-06)
@@ -207,6 +191,14 @@ smsRouter.post('/incoming', async (req, res) => {
   // Operator and promotional messages come from names ("JX-JIOINF"), not numbers: never a report, never a reply.
   if (!sms || !PHONE_RE.test(from) || !text) {
     res.json({ ok: true, outcome: 'IGNORED' satisfies SmsOutcome });
+    return;
+  }
+
+  // A volunteer answering an SOS with YES / NO (F28, BR-163) is not a report.
+  const answered = await answerBySms(from, text);
+  if (answered) {
+    res.json({ ok: true, outcome: 'ANSWER' satisfies SmsOutcome });
+    void sendSms(from, answered.reply);
     return;
   }
 

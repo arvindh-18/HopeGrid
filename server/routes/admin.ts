@@ -16,7 +16,8 @@ import { fromRow, fromRows, toRow } from '../mappers';
 import {
   addLog, allAssignments, endAssignment, getIncident, isUuid, recomputeIncident, reportsOf, toLink, updateIncident,
 } from '../pipeline';
-import { emitChange, openStream } from '../events';
+import { createAssignment, dispatchState, runDispatch, saveDispatchSettings } from '../dispatch';
+import { openStream } from '../events';
 import { removeFiles, signedUrls } from '../storage';
 import { db } from '../supabase';
 import { messagesWhere, toChatMessages } from './messages';
@@ -100,7 +101,10 @@ async function detail(id: string): Promise<IncidentDetail> {
     related: findRelated(toLink(i, []), others.map((o) => toLink(o, [])), humanize)
       .map(({ id: rid, code, type, text }) => ({ id: rid, code, type, text })),
     suggestions: canSuggest ? rankVolunteers(i, volunteers, assignments) : [],
-    assignments: asg.map((a) => ({ id: a.id, volunteerId: a.volunteerId, volunteerName: nameOf(a.volunteerId), volunteerPhone: phoneOf(a.volunteerId), status: a.status, reason: a.reason, updatedAt: a.updatedAt })),
+    assignments: asg.map((a) => ({
+      id: a.id, volunteerId: a.volunteerId, volunteerName: nameOf(a.volunteerId), volunteerPhone: phoneOf(a.volunteerId),
+      status: a.status, reason: a.reason, auto: !!a.auto, respondBy: a.respondBy ?? null, updatedAt: a.updatedAt,
+    })),
     allocations: allocations.map((a) => {
       const res = resources.find((r) => r.id === a.resourceId);
       return { id: a.id, resourceName: res?.name ?? 'Resource', quantity: a.quantity, unit: res?.unit ?? '', createdAt: a.createdAt };
@@ -321,12 +325,21 @@ adminRouter.post('/incidents/:id/assign', async (req, res) => {
     : [];
   if (!v) throw new ApiError('NOT_FOUND', 'This volunteer does not exist.');
   if (!isEligible(v, i.id, assignments)) throw new ApiError('INVALID_STATE', `${v.name} is not available for this incident.`);
-  const { error } = await db.from('assignments').insert({ incident_id: i.id, volunteer_id: v.id, status: 'ASSIGNED' });
-  if (error) throw new Error(`Assignment insert failed: ${error.message}`);
-  emitChange({ incidentId: i.id, volunteerId: v.id }); // lets that volunteer's stream start following this incident
+  await createAssignment(i, v, null);
   await addLog(i.id, `Volunteer ${v.name} assigned`, false);
-  await updateIncident(i.id, {});
+  // A coordinator chose this volunteer: a person has judged the incident (BR-165), so it may reach the public map.
+  await updateIncident(i.id, i.autoDispatchedAt ? { autoDispatchedAt: null } : {});
   res.json(await detail(i.id));
+});
+
+// GET /api/admin/dispatch → DispatchState; PUT {mode, threshold, responseMinutes} → DispatchState (F28, BR-160)
+adminRouter.get('/dispatch', async (_req, res) => {
+  res.json(await dispatchState());
+});
+adminRouter.put('/dispatch', async (req, res) => {
+  await saveDispatchSettings(req.body);
+  await runDispatch(); // a new mode or threshold applies at once
+  res.json(await dispatchState());
 });
 
 // POST /api/admin/assignments/:id/cancel
