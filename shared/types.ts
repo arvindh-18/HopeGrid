@@ -46,6 +46,12 @@ export type MarkerColor = 'RED' | 'ORANGE' | 'YELLOW' | 'GREEN';
 export type PublicStatus = 'ACTIVE' | 'RESPONDING' | 'RESOLVED';
 
 export type ProcessingStatus = 'PENDING' | 'DONE' | 'FAILED';
+/** How a report reached the server (F27): the app over the internet, or an SMS through the gateway phone. */
+export type ReportChannel = 'APP' | 'SMS';
+/** Media an SMS report says is still on the phone; it arrives with the full report (BR-07). */
+export type PendingMedia = 'PHOTO' | 'AUDIO';
+/** What POST /api/sms/incoming did with one SMS (BR-06). */
+export type SmsOutcome = 'CREATED' | 'ADDED' | 'ALREADY_RECEIVED' | 'IGNORED';
 export type AiSource = 'AI' | 'KEYWORDS';
 export type TranscriptStatus = 'NONE' | 'DONE' | 'FAILED';
 export type MessageSender = 'VICTIM' | 'VOLUNTEER';
@@ -85,6 +91,19 @@ export interface ReportSubmission {
   audioMime: string | null;
   audioSeconds: number | null;
   createdAt: string;
+}
+
+/** A report packed into one SMS by the app (BR-06, shared/sms.ts). */
+export interface SmsReport {
+  code: string;
+  pin: string;
+  lat: number | null;
+  lng: number | null;
+  locationText: string | null;
+  people: number | null;
+  needs: Need[];
+  pendingMedia: PendingMedia[];
+  text: string;
 }
 
 export interface TrackView {
@@ -148,6 +167,7 @@ export interface IncidentListItem {
   locationText: string | null;
   reportCount: number;
   hasVoice: boolean;
+  viaSms: boolean;
   possibleDuplicateCode: string | null;
   needsReassign: boolean;
   readyToResolve: boolean;
@@ -176,6 +196,9 @@ export interface AdminReport {
   lat: number | null;
   lng: number | null;
   locationText: string | null;
+  channel: ReportChannel;
+  pendingMedia: PendingMedia[];
+  completedAt: string | null;
   createdAt: string;
   receivedAt: string;
 }
@@ -352,6 +375,7 @@ export interface ReportRecord {
   locationText: string | null; people: number | null; needs: Need[]; phone: string | null; phoneVerified: boolean;
   photoPath: string | null; audioPath: string | null; audioSeconds: number | null;
   extraction: Extraction | null; aiSource: AiSource | null; processingStatus: ProcessingStatus;
+  channel: ReportChannel; pendingMedia: PendingMedia[]; completedAt: string | null;
   createdAt: string; receivedAt: string;
 }
 export interface AssignmentRecord {

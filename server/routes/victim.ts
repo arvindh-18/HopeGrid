@@ -1,5 +1,6 @@
 // server/routes/victim.ts — victim routes, no login (architecture §8.2):
-// POST /api/reports (F01), /api/track (F04), /api/track/verify-phone (F21).
+// POST /api/reports (F01; also completes a report that arrived by SMS, BR-07), /api/track (F04),
+// /api/track/verify-phone (F21).
 import { Router } from 'express';
 import {
   CODE_ALPHABET, DEMO_OTP, MAX_AUDIO_BASE64, MAX_AUDIO_SECONDS, MAX_PEOPLE, MAX_PHOTO_BASE64, MIN_REPORT_TEXT,
@@ -10,8 +11,8 @@ import {
   ApiError, CHAT_OPEN_ASSIGNMENT, NEEDS,
   type IncidentRecord, type LogRecord, type Need, type ReportRecord, type ReportSubmission, type TrackView,
 } from '../../shared/types';
-import { fromRow, fromRows, submissionToReportRow } from '../mappers';
-import { addLog, assignmentsOf, enqueueReport, getIncident, recomputeIncident } from '../pipeline';
+import { fromRow, fromRows, submissionToReportRow, toRow } from '../mappers';
+import { addLog, assignmentsOf, changeReport, enqueueReport, getIncident, recomputeIncident } from '../pipeline';
 import { openStream } from '../events';
 import { uploadBase64 } from '../storage';
 import { db } from '../supabase';
@@ -120,6 +121,45 @@ function validateSubmission(body: unknown): ReportSubmission {
   };
 }
 
+const mediaPaths = (reportId: string, sub: ReportSubmission) => ({
+  photoPath: sub.photoBase64 ? `reports/${reportId}/photo.jpg` : null,
+  audioPath: sub.audioBase64 && sub.audioMime ? `reports/${reportId}/audio.${AUDIO_EXT_RE.exec(sub.audioMime)![1]}` : null,
+});
+async function uploadMedia(sub: ReportSubmission, paths: { photoPath: string | null; audioPath: string | null }): Promise<void> {
+  if (paths.photoPath) await uploadBase64(paths.photoPath, sub.photoBase64!, 'image/jpeg');
+  if (paths.audioPath) await uploadBase64(paths.audioPath, sub.audioBase64!, sub.audioMime!);
+}
+
+/**
+ * BR-07: the phone's full report for a report that already arrived by SMS (same code and PIN). Its photo, voice note
+ * and full text go into that report instead of a second one, and the pipeline reads it again. A retry after that
+ * changes nothing.
+ */
+async function completeSmsReport(sms: ReportRecord, sub: ReportSubmission): Promise<void> {
+  if (sms.completedAt) return;
+  await changeReport(sms.id, async () => {
+    const paths = mediaPaths(sms.id, sub);
+    await uploadMedia(sub, paths);
+    const arrived = [paths.photoPath && 'photo', paths.audioPath && 'voice note'].filter(Boolean);
+    const { error } = await db.from('reports').update(toRow({
+      text: sub.text.trim() ? sub.text : sms.text,
+      lat: sub.lat ?? sms.lat, lng: sub.lat !== null ? sub.lng : sms.lng,
+      locationText: sub.locationText ?? sms.locationText,
+      people: sub.people ?? sms.people,
+      needs: [...new Set([...sms.needs, ...sub.needs])],
+      deviceId: sub.deviceId,
+      photoPath: paths.photoPath ?? sms.photoPath,
+      ...(paths.audioPath ? { audioPath: paths.audioPath, audioSeconds: sub.audioSeconds, transcript: null, transcriptStatus: 'NONE' } : {}),
+      pendingMedia: [], completedAt: new Date().toISOString(),
+      extraction: null, aiSource: null, processingStatus: 'PENDING', // read again (pipeline: later details)
+    })).eq('id', sms.id);
+    if (error) throw new Error(`Report update failed: ${error.message}`);
+    if (sms.incidentId) {
+      await addLog(sms.incidentId, `Full report arrived from the app${arrived.length ? ` with the ${arrived.join(' and ')}` : ''}`, false);
+    }
+  });
+}
+
 async function findReportCode(id: string): Promise<string | null> {
   const { data, error } = await db.from('reports').select('code').eq('id', id).maybeSingle();
   if (error) throw new Error(`Report lookup failed: ${error.message}`);
@@ -137,16 +177,23 @@ victimRouter.post('/reports', async (req, res) => {
     return;
   }
 
-  const { data: codeOwner, error: codeError } = await db.from('reports').select('id').eq('code', sub.code).maybeSingle();
+  const { data: codeOwner, error: codeError } = await db.from('reports').select('*').eq('code', sub.code).maybeSingle();
   if (codeError) throw new Error(`Report code lookup failed: ${codeError.message}`);
-  if (codeOwner) throw new ApiError('CODE_TAKEN', 'This report code is already in use.');
+  if (codeOwner) {
+    // The same report, sent earlier by SMS from this phone (F27): complete it (BR-07).
+    const owner = fromRow<ReportRecord>(codeOwner);
+    if (owner.channel === 'SMS' && owner.pin === sub.pin) {
+      await completeSmsReport(owner, sub);
+      res.status(200).json({ ok: true, code: sub.code });
+      return;
+    }
+    throw new ApiError('CODE_TAKEN', 'This report code is already in use.');
+  }
 
-  const photoPath = sub.photoBase64 ? `reports/${sub.id}/photo.jpg` : null;
-  const audioPath = sub.audioBase64 && sub.audioMime ? `reports/${sub.id}/audio.${AUDIO_EXT_RE.exec(sub.audioMime)![1]}` : null;
-  if (photoPath) await uploadBase64(photoPath, sub.photoBase64!, 'image/jpeg');
-  if (audioPath) await uploadBase64(audioPath, sub.audioBase64!, sub.audioMime!);
+  const paths = mediaPaths(sub.id, sub);
+  await uploadMedia(sub, paths);
 
-  const { error } = await db.from('reports').insert(submissionToReportRow(sub, { photoPath, audioPath }));
+  const { error } = await db.from('reports').insert(submissionToReportRow(sub, paths));
   if (error) {
     // Unique violation: a concurrent retry won the race (same id) or another phone took the code.
     if (error.code === '23505') {
@@ -197,7 +244,6 @@ victimRouter.post('/track', async (req, res) => {
   const view: TrackView = {
     code: r.code,
     step: victimStep({
-      processingStatus: r.processingStatus,
       incident: i ? { status: i.status, verifiedAt: i.verifiedAt } : null,
       assignments,
     }),

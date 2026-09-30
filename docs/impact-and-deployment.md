@@ -9,13 +9,16 @@
 | Part | Works without internet? | Detail |
 |---|---|---|
 | Victim's phone, report form | **Yes** | The app shell is cached (PWA). The report, photo and voice note are saved on the phone (IndexedDB outbox), and a code + PIN is shown straight away. |
-| Victim's report reaching coordinators | **No** | Nothing reaches the coordinator until the phone reaches the server. The outbox retries on its own (app start, when the connection returns, every 15 s). |
+| Victim's report reaching coordinators, over the internet | **No** | Nothing arrives this way until the phone reaches the server. The outbox retries on its own (app start, when the connection returns, every 15 s). |
+| Victim's report reaching coordinators, **by SMS** (F27) | **Yes, with mobile signal** | With signal but no mobile data, "Send by SMS" puts the report (code, PIN, GPS, people, needs, up to 200 characters of text) into one SMS to the gateway phone, which forwards it to the server. Basic phones can text plain words. Photos and voice notes can't go by SMS: they follow with the full report when the phone is online. Needs one Android gateway phone with a SIM at the server (`npm run sms:connect`); over a USB cable the gateway phone itself needs no internet. Checked in automated API tests and, for the phone side, in the Android emulator; **not yet tried with a real gateway phone** (TODO: needs verification). |
 | Server laptop | **Needs internet** | The database, photos and staff logins live in Supabase (cloud). The AI and speech models run locally, but the pipeline can't save results while the database is unreachable. It retries: failed reports are retried after 5 s, 30 s and 2 min, then by a sweep every 10 minutes. That FAILED reports are picked up again and finished without a second incident is tested; the timings are not. |
 | Coordinator and volunteer screens | **No** | They show the last data they had and an offline banner. |
 | Public map | Partly | Map images need internet; the page falls back to a list. |
 
-So HopeGrid **delays** reports during an outage but doesn't **lose** them; it can't deliver them during the outage.
-The whole chain works only when the phone, the server laptop and Supabase can reach each other.
+So during a **mobile-data** outage a report still reaches coordinators by SMS whenever the phone has signal, and the
+rest (photo, voice note, full text) follows later without creating a second report. With **no signal at all**, the
+report waits on the phone and is delayed, never lost. The server side still needs internet: the server laptop must
+reach Supabase (see the Server laptop row).
 
 ## 2. Deployment models
 
@@ -42,7 +45,9 @@ plus a phone hotspot), and the public HTTPS link (`npm run tunnel`) printed as a
 
 - **Trust and official status:** people call 112 or known officials, not a new link. HopeGrid needs to be
   introduced by a trusted local body, and it shows 112 on every victim screen.
-- **Smartphones only:** there's no SMS channel, so feature-phone users are left out (see docs/comparison.md §4).
+- **Feature phones:** they can report by plain-word SMS to the gateway number (F27) and get a code + PIN back, but
+  they can't use tracking, chat or the map, and the AI reads plain SMS like any other text (Tamil accuracy is weak).
+  One gateway phone and SIM is a bottleneck and a single point of failure; its throughput is not measured.
 - **Literacy and language:** voice notes help, but the screens are in 3 languages only, and Tamil AI accuracy is
   weak (docs/evaluation.md).
 - **Continuity:** the tool has to be ready before the monsoon, not built during it. Data must be cleaned after each
@@ -55,7 +60,8 @@ plus a phone hotspot), and the public HTTPS link (`npm run tunnel`) printed as a
 | Risk | Effect | Mitigation today | Still open |
 |---|---|---|---|
 | **Single laptop** (power, theft, crash, water) | Nothing is processed; coordinators see nothing new | Reports wait safely on phones (outbox) and in the database (PENDING/FAILED, retried) | A second laptop ready to take over; no automatic failover |
-| **Internet outage at the server** | Reports can't be stored or read | Outbox retries; the pipeline retries | Two internet links; SMS fallback not built |
+| **Mobile data down for victims** | Reports can't go over the internet | SMS fallback (F27) through the gateway phone; the full report follows later | Real-device test with a gateway phone; SMS costs for victims |
+| **Internet outage at the server** | Reports can't be stored or read | Outbox retries; the pipeline retries; SMS keeps arriving at the gateway phone, which retries delivery (its own retry schedule) | Two internet links; a local database for fully offline operation |
 | **AI misreads a report** | Wrong type or priority | Victim-selected needs and people override the AI; every score shows its reasons; humans verify | AI accuracy is modest (docs/evaluation.md) |
 | **Fake or malicious reports** | Wasted effort | Only verified incidents reach the public map (BR-80); coordinators reject; confidence reflects independent phones and photos | No rate limiting (owner decision); the 4-digit PIN can be guessed by repeated requests |
 | **Leaked keys** | Full database access | Keys only in the server's `.env` | The keys committed earlier must be rotated (TODO.md) |

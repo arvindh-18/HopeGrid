@@ -78,11 +78,19 @@ create table if not exists reports (
   extraction        jsonb,
   ai_source         text,                           -- AI | KEYWORDS
   processing_status text not null default 'PENDING', -- PENDING | DONE | FAILED
+  channel           text not null default 'APP',    -- APP | SMS (F27: arrived through the SMS gateway phone)
+  pending_media     text[] not null default '{}',   -- SMS reports: PHOTO / AUDIO still on the phone (BR-07)
+  completed_at      timestamptz,                    -- SMS reports: when the full report arrived from the app (BR-07)
   created_at        timestamptz not null,           -- time on the phone
   received_at       timestamptz not null default now()
 );
+-- Databases created before F27 (SMS fallback): add its columns. Safe to run again.
+alter table reports add column if not exists channel text not null default 'APP';
+alter table reports add column if not exists pending_media text[] not null default '{}';
+alter table reports add column if not exists completed_at timestamptz;
 create index if not exists reports_incident_id_idx on reports (incident_id);
 create index if not exists reports_processing_status_idx on reports (processing_status);
+create index if not exists reports_phone_idx on reports (phone); -- follow-up SMS from the same number (BR-06)
 
 -- 6.4 Assignments
 create table if not exists assignments (

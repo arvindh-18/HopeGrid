@@ -85,6 +85,22 @@
 
 **BR-05 Voice note.** Maximum 1 per report and 60 s; recording auto-stops at 60 s. Use MediaRecorder's default mime (`audio/webm` or `audio/mp4`) and store the mime with the base64.
 
+**BR-06 Reports by SMS (F27).** An SMS needs mobile signal but no mobile data.
+- **Phone side:** while a saved report is not SENT and the build has `VITE_SMS_NUMBER`, S03 offers "Send by SMS": it opens the phone's SMS app (`sms:` link, no permission) with the report packed by `encodeSmsReport()` (`shared/sms.ts`):
+  `HG1 <code> <pin>` then optional lines `G <lat> <lng>` (5 decimals), `P <people>`, `N <need letters>` (E evacuation, R rescue, M medical, H physical help, F food/water, S shelter, O other), `M <A|I>` (voice note / photo still on the phone), `L <location, ≤ SMS_LOCATION_MAX_CHARS>`, `T <description, ≤ SMS_TEXT_MAX_CHARS>` (last). Longer text is cut with "…". The outbox item stays QUEUED: the full report still uploads when online (BR-07).
+- **Server side:** `POST /api/sms/incoming` from the gateway phone. Off (404) while `SMS_WEBHOOK_SECRET` is empty. Accepted when signed like SMS Gateway for Android (`X-Signature` = hex HMAC-SHA256 of raw body + `X-Timestamp`, key = the secret) or with `Authorization: Bearer <secret>`; otherwise 401.
+- Ignored (200, no report, no reply): events other than `sms:received`, empty messages, and senders that are not PHONE_MIN_DIGITS–PHONE_MAX_DIGITS digits (operator messages come from names).
+- **Packed SMS** (`parseSmsReport()`; an unreadable line is dropped, never the whole report): creates a report with the phone's code and PIN. Same code + same PIN already stored (sent by internet first, or the SMS sent twice) → nothing new. Same code, different PIN → a new code. Never rejected for missing details: the team can call the sender.
+- **Plain words** (no valid header, e.g. a basic phone): if the same number sent an SMS report in the last SMS_FOLLOWUP_MINUTES whose incident is still active (or not yet created), the words are added to that report as a new line (BR-07) and it gets no reply. Otherwise a new report with a code and PIN made on the server.
+- Every SMS report: `channel` SMS, `phone` = the sender and `phone_verified` true (the network delivered it; counts for BR-20 like BR-140), `device_id` `sms:<number>`, `pending_media` from the `M` line, `created_at` = time received. Report text at most MAX_REPORT_TEXT characters.
+- A gateway delivering the same SMS twice creates one report: the report id is derived from the sender and the gateway's message id (packed: sender, code and PIN).
+- **Reply** (only when a new report was created, and only if `SMS_GATEWAY_URL` is set; best effort, a failure is logged): packed → "HopeGrid: report <code> received…"; plain words → the new code and PIN and "Reply with more details or your location"; both end with the emergency number.
+
+**BR-07 Later details for a report.** Two things change a stored report: the phone's full upload for a report that came by SMS (`POST /api/reports` with the same code **and** PIN; with a different PIN it stays CODE_TAKEN), and a follow-up SMS (BR-06).
+- The full upload adds the photo and voice note, the full text (the SMS text stays if the app text is empty), the phone's precise location and device id, merges needs, clears `pending_media`, sets `completed_at`, logs "Full report arrived from the app…" (admin) and answers 200 `{ok, code}`. Once `completed_at` is set a resend changes nothing.
+- Either change clears the report's extraction and sets it PENDING; the pipeline then transcribes a new voice note, structures the whole text again, and adds to the incident with `laterFacts()` (`shared/linking.ts`): a flag only turns on, a missing people count / location / summary is filled, a larger people count wins, a hazard type replaces a situation type, needs are added. Nothing is removed or lowered, and a priority override is untouched. Log "New details added: …" (admin). A RESOLVED/REJECTED incident is not changed; it gets the log "New details arrived after the incident was closed: …".
+- A report is never changed while the pipeline is processing it: the change is refused with a retryable 500 (the outbox or the gateway sends it again).
+
 ## B2. AI structuring
 
 **BR-10 Keyword extractor** (`shared/keywordExtractor.ts`, used for the offline preview and as the server fallback). Matching is case-insensitive on the combined text.
@@ -383,7 +399,7 @@ Status overrides:
 ## B8. Victim tracking
 
 **BR-90 Victim step** (`victimStep`, first match wins):
-1. Report `processing_status` PENDING or no incident → RECEIVED
+1. No incident yet (the report has not been processed) → RECEIVED. A report that already has an incident follows it, also while it is PENDING again for later details (BR-07)
 2. Incident REJECTED → CLOSED
 3. Incident RESOLVED → RESOLVED
 4. Active assignment ON_SITE or ASSISTING, or latest assignment DONE → ARRIVED
@@ -484,6 +500,7 @@ Availability: a volunteer may set AVAILABLE or OFFLINE only while they have no A
 - Requires a valid code + PIN and `otp === DEMO_OTP`.
 - Sets `phone` and `phone_verified = true` on the report, logs, and recomputes the incident.
 - No SMS is sent. The "Demo code" hint is shown only in DEV builds or when DEV_MODE is on.
+- A report that arrived by SMS is already verified: the network delivered it from that number (BR-06).
 
 ## B11. Volunteer registration
 
@@ -513,6 +530,10 @@ Availability: a volunteer may set AVAILABLE or OFFLINE only while they have no A
 | MAX_PHOTO_BASE64 / MAX_AUDIO_BASE64 | 3_000_000 / 3_000_000 characters |
 | AI_TIMEOUT_MS / WHISPER_TIMEOUT_MS | 30_000 / 60_000 |
 | OUTBOX_RETRY_MS | 15_000 |
+| SMS_TEXT_MAX_CHARS / SMS_LOCATION_MAX_CHARS (BR-06) | 200 / 80 |
+| MAX_REPORT_TEXT (report text incl. follow-up SMS) | 2000 |
+| SMS_FOLLOWUP_MINUTES (BR-06) | 60 |
+| SMS_REPLY_TIMEOUT_MS | 10_000 |
 | POLL_RESOURCES_MS / POLL_RESOURCE_PICKER_MS | 30_000 / 60_000 |
 | POLL_FALLBACK_MS (polling while a live change stream is connected) | 30_000 |
 | STREAM_PING_MS / STREAM_COALESCE_MS / STREAM_RETRY_MS / STREAM_RETRY_MAX_MS | 25_000 / 100 / 3_000 / 30_000 |

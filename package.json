@@ -17,6 +17,7 @@
     "tunnel:ngrok": "tsx server/scripts/tunnel-ngrok.ts",
     "app:apk": "tsx server/scripts/build-apk.ts",
     "app:open": "cap open android",
+    "sms:connect": "tsx server/scripts/sms-connect.ts",
     "preview": "vite preview",
     "seed": "tsx server/scripts/seed.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit --strict --target es2022 --module esnext --moduleResolution bundler --skipLibCheck --types node server/index.ts server/scripts/cleanup.ts eval/run.ts eval/bench.ts eval/prompt-experiment.ts eval/diagnose-type-bias.ts",

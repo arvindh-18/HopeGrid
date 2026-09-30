@@ -23,12 +23,15 @@ export function toRow(obj: object): Record<string, unknown> {
   return out;
 }
 
-/** New `reports` row from a victim submission (architecture §6.3). Media paths come from storage. */
+/**
+ * New `reports` row from a victim submission (architecture §6.3). Media paths come from storage. The SMS columns
+ * (channel, pending_media, completed_at) keep their database defaults: an app report is channel APP.
+ */
 export function submissionToReportRow(
   sub: ReportSubmission,
   media: { photoPath: string | null; audioPath: string | null },
 ) {
-  const record: Omit<ReportRecord, 'incidentId' | 'transcript' | 'extraction' | 'aiSource' | 'receivedAt'> = {
+  const record: Omit<ReportRecord, 'incidentId' | 'transcript' | 'extraction' | 'aiSource' | 'receivedAt' | 'channel' | 'pendingMedia' | 'completedAt'> = {
     id: sub.id,
     code: sub.code,
     pin: sub.pin,

@@ -47,7 +47,7 @@ district or State Disaster Management Authority the team pilots with.
 
 | Need | Feature (docs/features.md) | How it helps |
 |---|---|---|
-| Report with weak or no signal | F01 report form, F02 offline outbox | The report is saved on the phone first and sends itself when a connection returns |
+| Report with weak or no signal | F01 report form, F02 offline outbox, F27 reports by SMS | The report is saved on the phone first and sends itself when a connection returns. With signal but no mobile data it can go at once as one SMS to the gateway phone; basic phones can text plain words |
 | Report in one's own words and language | F03 voice note, F05 AI structuring (Whisper speech-to-text + English translation), F25 Tamil/Hindi screens | No need to type or pick from English menus. Whisper's language list includes 14 languages used in India (Hindi, Tamil, Telugu, Kannada, Malayalam, Marathi, Bengali, Gujarati, Punjabi, Urdu, Assamese, Nepali, Sindhi, Sanskrit) but not Odia, Kashmiri, Konkani, Maithili, Manipuri, Santali or Dogri ([whisper/tokenizer.py](https://github.com/openai/whisper/blob/main/whisper/tokenizer.py)). Being in the list doesn't guarantee good accuracy: see docs/evaluation.md |
 | Know the report arrived; follow up | F04 tracking with code + PIN, F17 private chat | Status steps ("Help is on the way") and a chat that never shares the phone number |
 | Triage many requests | F09 confidence and F10 priority with written reasons, F12 dashboard | Most urgent first; every score explains itself |

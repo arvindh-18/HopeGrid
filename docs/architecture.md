@@ -118,7 +118,8 @@ hopegrid/
 │   ├── linking.ts
 │   ├── volunteerMatch.ts
 │   ├── publicView.ts
-│   └── trackingStatus.ts
+│   ├── trackingStatus.ts
+│   └── sms.ts                    (F27 SMS format)
 ├── server/
 │   ├── index.ts
 │   ├── supabase.ts
@@ -137,11 +138,13 @@ hopegrid/
 │   │   ├── admin.ts
 │   │   ├── volunteer.ts
 │   │   ├── messages.ts
+│   │   ├── sms.ts                (F27 reports by SMS, from the gateway phone)
 │   │   └── dev.ts
 │   └── scripts/
 │       ├── seed.ts
 │       ├── setup-models.ts       (npm run setup-ai)
-│       └── cleanup.ts            (retention: dry run unless --apply)
+│       ├── cleanup.ts            (retention: dry run unless --apply)
+│       └── sms-connect.ts        (npm run sms:connect: points the gateway phone at this server)
 ├── src/
 │   ├── main.tsx
 │   ├── App.tsx
@@ -162,7 +165,8 @@ hopegrid/
 │   │   ├── codes.ts
 │   │   ├── media.ts
 │   │   ├── geo.ts
-│   │   └── labels.ts
+│   │   ├── labels.ts
+│   │   └── sms.ts                (F27: gateway number, sms: link)
 │   ├── components/
 │   │   ├── Layout.tsx
 │   │   ├── Badges.tsx
@@ -218,10 +222,11 @@ hopegrid/
 | constants.ts | Thresholds, weights, polling intervals, limits, code alphabet, emergency number default. | All numbers used by rules live here. |
 | keywordExtractor.ts | Text → `Extraction` without AI (offline preview + server fallback). | BR-10 |
 | scoring.ts | `computeConfidence`, `computePriority`, `effectivePriority`, `computeEscalation`. | BR-20…BR-32 |
-| linking.ts | `findDuplicate`, `findRelated`, `mergeFields`. | BR-40…BR-52 |
+| linking.ts | `findDuplicate`, `findRelated`, `mergeFields`, `laterFacts`. | BR-40…BR-52, BR-07 |
 | volunteerMatch.ts | `rankVolunteers`. | BR-60…BR-63 |
 | publicView.ts | `isPublic`, `toPublicIncident`, `adviceFor`, `markerColor`. | BR-80…BR-84 |
 | trackingStatus.ts | `victimStep` (internal state → victim step). | BR-90 |
+| sms.ts | `encodeSmsReport` (phone) and `parseSmsReport` (server): the one-SMS report format. | BR-06 |
 
 **server/**
 
@@ -234,8 +239,9 @@ hopegrid/
 | storage.ts | `uploadBase64(path, base64, mime)`, `signedUrl(path)` (1 hour). |
 | ai.ts | `structureText(text): Promise<{extraction, source}>` — local LLM call (node-llama-cpp) (timeout 30 s, JSON schema of `Extraction`), validate/coerce (BR-11), on any failure use `keywordExtractor` and `source = KEYWORDS`. |
 | transcribe.ts | `transcribe(storagePath): Promise<{text, language, english}>` — download audio, ffmpeg → 16 kHz mono PCM, whisper.cpp in-process (language auto); non-English speech also translated to English (BR-12). Timeout 60 s. Throws on failure. |
-| pipeline.ts | `processReport(reportId)`, `recomputeIncident(incidentId)`, `processPendingReports()`. Implements §11.2. |
-| routes/victim.ts | `/api/reports`, `/api/track`, `/api/track/verify-phone`. |
+| pipeline.ts | `processReport(reportId)`, `recomputeIncident(incidentId)`, `processPendingReports()`, `changeReport(id, change)` (BR-07: change a stored report only while it is not being processed, then queue it again), `checkSchema()` (startup warning when schema.sql needs re-running). Implements §11.2. |
+| routes/victim.ts | `/api/reports` (also completes a report that came by SMS, BR-07), `/api/track`, `/api/track/verify-phone`. |
+| routes/sms.ts | `POST /api/sms/incoming` (F27, BR-06): checks the gateway's signature or bearer secret, turns packed or plain-word SMS into reports, adds follow-ups, replies through the gateway. Mounted before the JSON parser (the signature covers the raw body). |
 | routes/public.ts | `/api/public/incidents`. |
 | events.ts | In-process change signals: `emitChange({incidentId, reportId?, volunteerId?})` (called on every incident update, log, report link/finish, chat message and assignment), merged per `STREAM_COALESCE_MS`; `openStream(res, pick)` writes a Server-Sent Events stream with a ping every `STREAM_PING_MS`. |
 | routes/authRoutes.ts | `/api/auth/login`, `/api/auth/me`. Login without a profile row → 401; the message says "waiting for approval" when a PENDING volunteer application exists (BR-150). |
@@ -266,6 +272,7 @@ hopegrid/
 | lib/media.ts | `compressImage(file) → base64 jpeg` (max 1280 px, quality 0.7); `blobToBase64`. |
 | lib/geo.ts | `getPosition()` with 10 s timeout; `distanceMeters()` (re-export of shared if needed). |
 | lib/labels.ts | Enum → display text, colors, icons. |
+| lib/sms.ts | F27: `SMS_NUMBER` (from `VITE_SMS_NUMBER`), `smsHref(number, body)`. |
 | components/Layout.tsx | Header, nav per role, offline banner, emergency number banner on public pages. |
 | components/Badges.tsx | PriorityBadge, ConfidenceBadge, StatusBadge. |
 | components/ReasonList.tsx | Renders `Reason[]` ("+20 · 2 independent reports"). |
@@ -377,7 +384,10 @@ Conventions: `id uuid primary key default gen_random_uuid()` unless stated; `cre
 | extraction | jsonb | yes | `Extraction` |
 | ai_source | text | yes | `AI` \| `KEYWORDS` |
 | processing_status | text | no | `PENDING` \| `DONE` \| `FAILED` |
-| created_at | timestamptz | no | time on the phone |
+| channel | text | no | `APP` \| `SMS` (F27), default APP |
+| pending_media | text[] | no | SMS reports: `PHOTO` / `AUDIO` still on the phone (BR-07) |
+| completed_at | timestamptz | yes | SMS reports: when the phone's full upload arrived (BR-07) |
+| created_at | timestamptz | no | time on the phone (SMS: time received) |
 | received_at | timestamptz | no | server time, default now() |
 
 ### 6.4 `assignments`
@@ -505,7 +515,7 @@ Body: `{ "error": { "code": ErrorCode, "message": string } }`
 
 | Method | Path | Request | Response |
 |---|---|---|---|
-| POST | /reports | `ReportSubmission` | 201 `{ok:true, code}`; 200 same body if `id` already exists; 409 CODE_TAKEN |
+| POST | /reports | `ReportSubmission` | 201 `{ok:true, code}`; 200 same body if `id` already exists, or when it completes the SMS report with the same code and PIN (BR-07); 409 CODE_TAKEN |
 | POST | /track | `{code, pin}` | `TrackView` |
 | POST | /track/verify-phone | `{code, pin, phone, otp}` | `{ok:true}`; 400 if otp ≠ `123456` |
 | POST | /track/chat | `{code, pin}` | `{open: boolean, messages: ChatMessage[]}` |
@@ -522,6 +532,12 @@ ReportSubmission = { id: uuid, code: string, pin: string, deviceId: string,
 TrackView = { code, step: VictimStep, updatedAt, messages: {at, text}[],   // public logs
   phoneVerified: boolean, chatOpen: boolean }
 ```
+
+**SMS gateway** (F27, BR-06; not for browsers)
+
+| Method | Path | Request | Response |
+|---|---|---|---|
+| POST | /sms/incoming | SMS Gateway for Android webhook `{event: "sms:received", payload: {message, sender, messageId, receivedAt}}` signed with `X-Signature` + `X-Timestamp`, or `{from, text}` with `Authorization: Bearer <SMS_WEBHOOK_SECRET>` | `{ok:true, outcome: SmsOutcome, code?}` (CREATED \| ADDED \| ALREADY_RECEIVED \| IGNORED); 401 wrong signature/secret; 404 while `SMS_WEBHOOK_SECRET` is empty; 500 (retry) while the report is being processed |
 
 **Public**
 
@@ -680,6 +696,10 @@ Errors are thrown as `ApiError {code, message}` in both implementations.
 | DEV_MODE | server | true | enables /api/dev/reset and demo OTP hint |
 | EMERGENCY_NUMBER | server | 112 | |
 | VITE_EMERGENCY_NUMBER | frontend | 112 | |
+| SMS_WEBHOOK_SECRET | server | long random text | F27: turns on `/api/sms/incoming`; same value as the gateway app's webhook Signing Key |
+| SMS_GATEWAY_URL / SMS_GATEWAY_USER / SMS_GATEWAY_PASSWORD | server | http://192.168.1.20:8080 | F27 replies: the gateway app's Local Server address and login (USB: http://127.0.0.1:8080) |
+| VITE_SMS_NUMBER | frontend | +919840000000 | F27: the gateway phone's number; "Send by SMS" is hidden without it |
+| PUBLIC_SERVER_URL / NGROK_AUTHTOKEN | scripts | https://name.ngrok-free.dev | ngrok address (`tunnel:ngrok`, `app:apk`, `sms:connect`) |
 
 In Supabase project settings set **JWT expiry = 86400 seconds** so staff tokens last the whole demo.
 
@@ -705,6 +725,12 @@ Report page → build ReportSubmission (id, code, pin generated on phone; device
   → outbox.enqueue(item)  (ALWAYS, online or offline)
   → navigate /report/sent/:id (show code + PIN + keyword preview)
   → outbox tries sending (see rules.md BR-02)
+
+No internet (F27, BR-06/07):
+  S03 "Send by SMS" → phone's SMS app → gateway phone (SIM) → POST /api/sms/incoming
+  → report (channel SMS, the phone's code + PIN) → processReport as below → reply SMS
+  later, online: outbox → POST /reports (same code + PIN) → photo/voice/full text added to that report
+  → pipeline reads it again and adds new facts to the incident (laterFacts)
 ```
 
 ### 11.2 Server pipeline (`server/pipeline.ts`)

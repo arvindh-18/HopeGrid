@@ -14,6 +14,7 @@ import { getPosition, type Position } from '../lib/geo';
 import { PEOPLE_CHOICES } from '../lib/labels';
 import { compressImage, toDataUrl } from '../lib/media';
 import { getDeviceId } from '../offline/deviceId';
+import { SMS_NUMBER } from '../lib/sms';
 import * as outbox from '../offline/outbox';
 
 type Loc = { state: 'locating' } | { state: 'ok'; pos: Position } | { state: 'error'; message: string };
@@ -123,6 +124,10 @@ export default function Report() {
             onChange={setVoice}
             onRecordingChange={(rec) => { if (liveText) { if (rec) dictation.start(); else dictation.stop(); } }}
           />
+          {/* Not tied to "online": the Android app's WebView reports online even without data. */}
+          {SMS_NUMBER && voice && text.trim().length < MIN_REPORT_TEXT && (
+            <p className="t-caption">{t('sms.addWords')}</p>
+          )}
           {dictation.supported && (
             <div className="flex flex-wrap items-center gap-3 t-caption">
               <label className="flex items-center gap-2">

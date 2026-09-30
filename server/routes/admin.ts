@@ -43,14 +43,15 @@ const activeOf = (asg: AssignmentRecord[]) => asg.find((a) => ACTIVE_ASSIGNMENT.
 
 // ---------------------------------------------------------------- read models
 
-function listItem(i: IncidentRecord, reports: Pick<ReportRecord, 'audioPath'>[], asg: AssignmentRecord[], dupCode: string | null): IncidentListItem {
+function listItem(i: IncidentRecord, reports: Pick<ReportRecord, 'audioPath' | 'channel'>[], asg: AssignmentRecord[], dupCode: string | null): IncidentListItem {
   const active = activeOf(asg);
   const latest = asg[asg.length - 1];
   return {
     id: i.id, code: i.code, type: i.type, status: i.status,
     priority: effectivePriority(i.priority, i.priorityOverride), overridden: i.priorityOverride !== null,
     confidence: i.confidence, confidenceBand: confidenceBand(i.confidence), people: i.people, locationText: i.locationText,
-    reportCount: reports.length, hasVoice: reports.some((r) => !!r.audioPath), possibleDuplicateCode: dupCode,
+    reportCount: reports.length, hasVoice: reports.some((r) => !!r.audioPath), viaSms: reports.some((r) => r.channel === 'SMS'),
+    possibleDuplicateCode: dupCode,
     // BR-103 derived flags
     needsReassign: (i.status === 'NEW' || i.status === 'VERIFIED') && !active && asg.some((a) => a.status === 'DECLINED' || a.status === 'UNABLE'),
     readyToResolve: i.status === 'IN_PROGRESS' && latest?.status === 'DONE',
@@ -91,7 +92,8 @@ async function detail(id: string): Promise<IncidentDetail> {
       photoUrl: r.photoPath ? urls.get(r.photoPath) ?? null : null, audioUrl: r.audioPath ? urls.get(r.audioPath) ?? null : null,
       audioSeconds: r.audioSeconds, people: r.people, needs: r.needs, phone: r.phone, phoneVerified: r.phoneVerified,
       extraction: r.extraction, aiSource: r.aiSource, processingStatus: r.processingStatus, lat: r.lat, lng: r.lng,
-      locationText: r.locationText, createdAt: r.createdAt, receivedAt: r.receivedAt,
+      locationText: r.locationText, channel: r.channel, pendingMedia: r.pendingMedia, completedAt: r.completedAt,
+      createdAt: r.createdAt, receivedAt: r.receivedAt,
     })),
     possibleDuplicate: dup ? { id: dup.id, code: dup.code, type: dup.type, summary: dup.summary, distanceM: distanceBetween(i, dup) } : null,
     // BR-45: computed on read, never stored. Only type, place and time matter here.
@@ -122,7 +124,7 @@ adminRouter.get('/events', (_req, res) => {
 adminRouter.get('/incidents', async (_req, res) => {
   const [incidents, reports, assignments] = await Promise.all([
     rows<IncidentRecord>(db.from('incidents').select('*').neq('status', 'MERGED'), 'Incident lookup failed'),
-    rows<Pick<ReportRecord, 'incidentId' | 'audioPath'>>(db.from('reports').select('incident_id, audio_path').not('incident_id', 'is', null), 'Report lookup failed'),
+    rows<Pick<ReportRecord, 'incidentId' | 'audioPath' | 'channel'>>(db.from('reports').select('incident_id, audio_path, channel').not('incident_id', 'is', null), 'Report lookup failed'),
     allAssignments(),
   ]);
   const codeOf = new Map(incidents.map((i) => [i.id, i.code]));

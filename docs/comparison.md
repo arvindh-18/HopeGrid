@@ -19,7 +19,7 @@
 
 | | Offline reporting | AI runs locally (no cloud AI service) | Multilingual **voice** reports | Public view private by design | Humans decide (AI never acts) | Cost / self-hosting |
 |---|---|---|---|---|---|---|
-| **HopeGrid** | Yes — phone saves the report and sends it later (outbox). It reaches responders only once the server is reachable. | Yes — Qwen 2.5 3B + Whisper run on the **server laptop** (not on the phone) | Yes — Whisper transcription + English translation; quality measured and **weak for Tamil** (docs/evaluation.md) | Yes — only verified incidents, coordinates rounded, no report text (BR-80/81, tested) | Yes — AI only fills fields (AR-20, tested) | Self-hosted on one laptop + a Supabase project. **No licence file yet** (TODO) |
+| **HopeGrid** | Yes — phone saves the report and sends it later (outbox), or sends it by SMS with signal but no data (F27, through one gateway phone). | Yes — Qwen 2.5 3B + Whisper run on the **server laptop** (not on the phone) | Yes — Whisper transcription + English translation; quality measured and **weak for Tamil** (docs/evaluation.md) | Yes — only verified incidents, coordinates rounded, no report text (BR-80/81, tested) | Yes — AI only fills fields (AR-20, tested) | Self-hosted on one laptop + a Supabase project. **No licence file yet** (TODO) |
 | **Ushahidi** | Yes (mobile apps) | Not verified | Not verified | Not verified | Not verified | Open source (AGPL-3.0), self-hostable; hosted plans not verified |
 | **KoboToolbox** | Yes (KoboCollect, web forms) | Not verified (AI features exist; where they run is not stated) | Audio transcription and translation stated; languages covered not verified | Not verified (a data-collection tool, not a public map) | Not verified | Open source; self-hosting not verified |
 | **Sahana Eden** | Not verified | Not verified | Not verified | Not verified | Not verified | Open source; listed as legacy |
@@ -44,8 +44,9 @@
 
 - **Maturity and real deployments.** Ushahidi, KoboToolbox and Survey123 are established products. HopeGrid is a
   hackathon prototype with no real users yet.
-- **SMS and feature phones.** Ushahidi, Sahana Eden and ERSS 112 accept SMS. HopeGrid needs a smartphone browser
-  and has **no SMS channel**, which excludes feature-phone users.
+- **SMS and feature phones.** Ushahidi, Sahana Eden and ERSS 112 accept SMS. HopeGrid now accepts SMS too (F27),
+  but only through one Android gateway phone with one SIM, and feature-phone users get reporting only (no tracking,
+  chat or map). It has not been tried with a real gateway phone yet.
 - **Language breadth.** KoboToolbox supports form translations in hundreds of languages. HopeGrid's screens are in
   3 languages, and its own evaluation shows weak AI accuracy on Tamil.
 - **Official status and reach.** 112 is the national emergency number with state dispatch; HopeGrid is not

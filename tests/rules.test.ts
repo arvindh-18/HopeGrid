@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { chooseType, keywordExtractor } from '../shared/keywordExtractor';
 import { computeConfidence, computeEscalation, computePriority, confidenceBand } from '../shared/scoring';
-import { compatibleTypes, findDuplicate, findRelated, mergeFields, type LinkIncident, type MergeableIncident } from '../shared/linking';
+import { compatibleTypes, findDuplicate, findRelated, laterFacts, mergeFields, type LaterFactsIncident, type LinkIncident, type MergeableIncident } from '../shared/linking';
 import { rankVolunteers, type MatchVolunteer } from '../shared/volunteerMatch';
 import { isPublic, markerColor, toPublicIncident, withinRadius } from '../shared/publicView';
 import { victimStep } from '../shared/trackingStatus';
-import { DEMO_CENTER } from '../shared/constants';
+import { encodeSmsReport, parseSmsReport } from '../shared/sms';
+import { humanize } from '../shared/volunteerMatch';
+import { DEMO_CENTER, SMS_LOCATION_MAX_CHARS, SMS_TEXT_MAX_CHARS } from '../shared/constants';
+import type { Extraction } from '../shared/types';
 
 const now = new Date('2026-09-24T10:00:00Z');
 const minsAgo = (m: number) => new Date(now.getTime() - m * 60_000).toISOString();
@@ -224,10 +227,78 @@ describe('BR-85 map radius', () => {
 describe('BR-90 victim step', () => {
   const inc = { status: 'IN_PROGRESS' as const, verifiedAt: minsAgo(5) };
   it('maps states', () => {
-    expect(victimStep({ processingStatus: 'PENDING', incident: null, assignments: [] })).toBe('RECEIVED');
-    expect(victimStep({ processingStatus: 'DONE', incident: { status: 'NEW', verifiedAt: null }, assignments: [] })).toBe('REVIEWING');
-    expect(victimStep({ processingStatus: 'DONE', incident: inc, assignments: [{ status: 'EN_ROUTE' }] })).toBe('ON_THE_WAY');
-    expect(victimStep({ processingStatus: 'DONE', incident: inc, assignments: [{ status: 'DONE' }] })).toBe('ARRIVED');
-    expect(victimStep({ processingStatus: 'DONE', incident: { status: 'REJECTED', verifiedAt: null }, assignments: [] })).toBe('CLOSED');
+    expect(victimStep({ incident: null, assignments: [] })).toBe('RECEIVED');
+    expect(victimStep({ incident: { status: 'NEW', verifiedAt: null }, assignments: [] })).toBe('REVIEWING');
+    expect(victimStep({ incident: inc, assignments: [{ status: 'EN_ROUTE' }] })).toBe('ON_THE_WAY');
+    expect(victimStep({ incident: inc, assignments: [{ status: 'DONE' }] })).toBe('ARRIVED');
+    expect(victimStep({ incident: { status: 'REJECTED', verifiedAt: null }, assignments: [] })).toBe('CLOSED');
+  });
+});
+
+describe('BR-06 SMS format', () => {
+  const report = {
+    code: 'K7P2QX', pin: '4821', lat: 13.082712, lng: 80.270718, locationText: 'Near the\ntemple', people: 4,
+    needs: ['MEDICAL', 'RESCUE'] as const, photoBase64: 'photo', audioBase64: 'audio', text: 'Water rising.\nGrandmother cannot walk',
+  };
+  const empty = { ...report, lat: null, lng: null, locationText: null, people: null, needs: [], photoBase64: null, audioBase64: null, text: '' };
+
+  it('packs a report into one SMS and unpacks the same report', () => {
+    const body = encodeSmsReport({ ...report, needs: [...report.needs] });
+    expect(body).toBe('HG1 K7P2QX 4821\nG 13.08271 80.27072\nP 4\nN RM\nM AI\nL Near the temple\nT Water rising. Grandmother cannot walk');
+    expect(parseSmsReport(body)).toEqual({
+      code: 'K7P2QX', pin: '4821', lat: 13.08271, lng: 80.27072, locationText: 'Near the temple', people: 4,
+      needs: ['RESCUE', 'MEDICAL'], pendingMedia: ['AUDIO', 'PHOTO'], text: 'Water rising. Grandmother cannot walk',
+    });
+  });
+
+  it('leaves out what the report does not have, and shortens long text (the full text comes with the upload)', () => {
+    expect(encodeSmsReport(empty)).toBe('HG1 K7P2QX 4821');
+    const long = encodeSmsReport({ ...empty, text: 'water '.repeat(100), locationText: 'street '.repeat(40) }).split('\n');
+    expect(long[1].startsWith('L ') && long[1].endsWith('…') && long[1].length).toBe(SMS_LOCATION_MAX_CHARS + 2);
+    expect(long[2].startsWith('T ') && long[2].endsWith('…') && long[2].length).toBe(SMS_TEXT_MAX_CHARS + 2);
+  });
+
+  it('treats a message without a valid header as plain words', () => {
+    expect(parseSmsReport('Water entered our house near the temple')).toBeNull();
+    expect(parseSmsReport('HG1 K7P2Q 4821')).toBeNull(); // 5-character code
+    expect(parseSmsReport('HG1 K7P2Q0 4821')).toBeNull(); // 0 is not in the code alphabet
+    expect(parseSmsReport('HG1 K7P2QX 48')).toBeNull();
+    expect(parseSmsReport('hg1 k7p2qx 4821')?.code).toBe('K7P2QX');
+  });
+
+  it('drops only the lines it cannot read, and keeps a multi-line description', () => {
+    expect(parseSmsReport('HG1 K7P2QX 4821\nG 95 80\nP 9999\nN RZ\nX something new\nT line one\nline two')).toEqual({
+      code: 'K7P2QX', pin: '4821', lat: null, lng: null, locationText: null, people: null, needs: ['RESCUE'], pendingMedia: [],
+      text: 'line one\nline two',
+    });
+  });
+});
+
+describe('BR-07 later details only add facts', () => {
+  const extraction = (over: Partial<Extraction> = {}): Extraction => ({
+    type: 'OTHER', people: null, vulnerable: false, mobilityIssue: false, trapped: false, medical: false, danger: false,
+    needs: [], places: [], summary: '', ...over,
+  });
+  const incident = (over: Partial<LaterFactsIncident> = {}): LaterFactsIncident => ({
+    type: 'OTHER', people: null, vulnerable: false, trapped: false, medical: false, danger: false, needs: ['RESCUE'],
+    locationText: null, summary: null, ...over,
+  });
+
+  it('fills what the SMS did not have: type, people, flags, needs, place, summary', () => {
+    const { patch, added } = laterFacts(incident(), extraction({
+      type: 'FLOOD', people: 3, mobilityIssue: true, trapped: true, needs: ['RESCUE', 'MEDICAL'], places: ['Canal Road'], summary: 'Flooded house',
+    }), humanize);
+    expect(patch).toEqual({
+      type: 'FLOOD', people: 3, trapped: true, vulnerable: true, needs: ['RESCUE', 'MEDICAL'], locationText: 'Canal Road', summary: 'Flooded house',
+    });
+    expect(added).toEqual(['type Flood', '3 people', 'trapped', 'vulnerable', 'needs Medical', 'place Canal Road']);
+  });
+
+  it('never removes, lowers or replaces anything', () => {
+    const full = incident({ type: 'FIRE', people: 5, vulnerable: true, trapped: true, medical: true, danger: true, locationText: 'Market Road', summary: 'Fire' });
+    expect(laterFacts(full, extraction({ type: 'FLOOD', people: 2, places: ['Lake Road'], summary: 'Other' }), humanize)).toEqual({ patch: {}, added: [] });
+    // A hazard type replaces a situation type (as in a merge, BR-50), and a larger count wins.
+    expect(laterFacts(incident({ type: 'PEOPLE_TRAPPED', people: 2 }), extraction({ type: 'LANDSLIDE', people: 6 }), humanize).patch)
+      .toEqual({ type: 'LANDSLIDE', people: 6 });
   });
 });

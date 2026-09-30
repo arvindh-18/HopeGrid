@@ -10,6 +10,7 @@ import { authRouter } from '../../server/routes/authRoutes';
 import { devRouter } from '../../server/routes/dev';
 import { messagesRouter } from '../../server/routes/messages';
 import { publicRouter } from '../../server/routes/public';
+import { smsRouter } from '../../server/routes/sms';
 import { appCors } from '../../server/cors';
 import { victimRouter } from '../../server/routes/victim';
 import { volunteerRouter } from '../../server/routes/volunteer';
@@ -52,6 +53,7 @@ export async function startTestServer({ devMode = false } = {}): Promise<TestSer
   const errors: unknown[] = [];
   const app = express();
   app.use('/api', appCors);
+  app.use('/api/sms', smsRouter);
   app.use(express.json({ limit: '15mb' }));
   app.use('/api', victimRouter);
   app.use('/api', messagesRouter);

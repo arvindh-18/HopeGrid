@@ -1,13 +1,15 @@
-// server/pipeline.ts — report processing and incident recompute (architecture §11.2), plus the incident
-// helpers every route shares: logs (BR-110), recompute and ending an assignment (BR-102, BR-104).
+// server/pipeline.ts — report processing and incident recompute (architecture §11.2), later details for a report
+// (BR-07), plus the incident helpers every route shares: logs (BR-110), recompute and ending an assignment
+// (BR-102, BR-104).
 import { randomInt } from 'node:crypto';
 import { CODE_ALPHABET, INCIDENT_CODE_LENGTH } from '../shared/constants';
-import { findDuplicate, type LinkIncident } from '../shared/linking';
+import { findDuplicate, laterFacts, type LinkIncident } from '../shared/linking';
 import { computeConfidence, computeEscalation, computePriority, effectivePriority } from '../shared/scoring';
 import {
   ACTIVE_STATUSES, ApiError,
-  type AssignmentRecord, type IncidentRecord, type ReportRecord,
+  type AssignmentRecord, type IncidentRecord, type ReportRecord, type TranscriptStatus,
 } from '../shared/types';
+import { humanize } from '../shared/volunteerMatch';
 import { structureText } from './ai';
 import { emitChange } from './events';
 import { fromRow, fromRows, toRow } from './mappers';
@@ -137,6 +139,30 @@ export function enqueueReport(reportId: string): void {
   pump();
 }
 
+/**
+ * Changes a stored report — the full report after an SMS, or a follow-up SMS (BR-07) — then queues it again. A report
+ * that is being processed right now must not change underneath the pipeline: the caller gets a retryable error
+ * (500), so the phone's outbox or the SMS gateway simply sends again a little later.
+ */
+export async function changeReport(reportId: string, change: () => Promise<void>): Promise<void> {
+  if (inFlight.has(reportId)) throw new ApiError('SERVER_ERROR', 'This report is being processed right now. Please try again in a moment.');
+  inFlight.add(reportId); // processReport skips it until the change is written
+  try {
+    await change();
+  } finally {
+    inFlight.delete(reportId);
+    enqueueReport(reportId);
+  }
+}
+
+/** At startup: say so plainly when the database is missing columns added by a newer schema.sql. */
+export async function checkSchema(): Promise<void> {
+  const { error } = await db.from('reports').select('channel, pending_media, completed_at').limit(1);
+  if (error && /column|schema cache/i.test(error.message)) {
+    throw new Error(`The database is missing new columns (${error.message}). Run supabase/schema.sql again in the Supabase SQL editor: it is safe to re-run.`);
+  }
+}
+
 /** For monitoring and tests. */
 export const queueState = () => ({ waiting: waiting.length, running: inFlight.size, failing: failures.size });
 
@@ -183,6 +209,55 @@ async function orphanIncidentOf(r: ReportRecord): Promise<IncidentRecord | null>
   return null;
 }
 
+/** Step 1 (BR-12): what the voice note says, transcribed now if it hasn't been yet. Failure never stops processing. */
+async function hear(r: ReportRecord): Promise<{ transcript: string | null; forAi: string | null; status: TranscriptStatus }> {
+  if (!r.audioPath || r.transcriptStatus !== 'NONE') return { transcript: r.transcript, forAi: r.transcript, status: r.transcriptStatus };
+  try {
+    // Non-English speech also gets an English translation: staff see both, and the AI reads both — the original
+    // keeps what a poor translation loses.
+    const heard = await transcribe(r.audioPath);
+    return {
+      transcript: heard.english ? `${heard.text}\n\nEnglish: ${heard.english}` : heard.text,
+      forAi: heard.english ? `${heard.text}\n(English machine translation, may be inaccurate: ${heard.english})` : heard.text,
+      status: 'DONE',
+    };
+  } catch (e) {
+    console.warn(`Transcription failed for report ${r.id}: ${e instanceof Error ? e.message : e}`);
+    return { transcript: null, forAi: null, status: 'FAILED' };
+  }
+}
+
+/** Steps 2–4: structure text + transcript (BR-10, BR-11); the victim's own answers win (BR-13). */
+async function structure(r: ReportRecord, forAi: string | null) {
+  const description = [r.text, forAi].filter((s) => s && s.trim()).join('\n');
+  const result = await structureText(description);
+  if (r.people !== null) result.extraction.people = r.people;
+  result.extraction.needs = [...new Set([...result.extraction.needs, ...r.needs])];
+  return result;
+}
+
+/**
+ * BR-07: a linked report got new details (its extraction was cleared): read it again and add what's new to its
+ * incident. Only adds (laterFacts); a closed incident gets a log only.
+ */
+async function addLaterDetails(r: ReportRecord, incidentId: string): Promise<void> {
+  const heard = await hear(r);
+  const { extraction, source } = await structure(r, heard.forAi);
+  check(await db.from('reports').update(toRow({
+    transcript: heard.transcript, transcriptStatus: heard.status, extraction, aiSource: source,
+  })).eq('id', r.id), 'Report update failed');
+  if (heard.status === 'FAILED' && r.transcriptStatus === 'NONE') await addLog(incidentId, 'Voice note could not be transcribed — listen to it', false);
+
+  const i = await getIncident(incidentId);
+  const { patch, added } = laterFacts(i, extraction, humanize);
+  if (!ACTIVE_STATUSES.includes(i.status)) {
+    if (added.length) await addLog(incidentId, `New details arrived after the incident was closed: ${added.join('; ')}`, false);
+    return;
+  }
+  if (Object.keys(patch).length) await updateIncident(incidentId, patch);
+  if (added.length) await addLog(incidentId, `New details added: ${added.join('; ')}`, false);
+}
+
 /** architecture §11.2 steps 1–8, for one report. Run through enqueueReport(), never awaited by the request (D9). */
 export async function processReport(reportId: string): Promise<void> {
   if (inFlight.has(reportId)) return;
@@ -193,7 +268,9 @@ export async function processReport(reportId: string): Promise<void> {
     const r = fromRow<ReportRecord>(row);
     if (r.processingStatus === 'DONE') return;
     if (r.incidentId) {
-      // Stopped after the report was linked to its incident: finish the scores without creating a second incident.
+      // Linked already. Either processing stopped before DONE (finish the scores without a second incident), or new
+      // details arrived later and cleared the extraction (BR-07): read them first.
+      if (!r.extraction) await addLaterDetails(r, r.incidentId);
       await recomputeIncident(r.incidentId);
       check(await db.from('reports').update({ processing_status: 'DONE' }).eq('id', r.id), 'Report update failed');
       emitChange({ incidentId: r.incidentId, reportId: r.id });
@@ -201,30 +278,9 @@ export async function processReport(reportId: string): Promise<void> {
       return;
     }
 
-    // 1. Transcribe (BR-12). Failure never stops processing. Non-English speech also gets an English
-    // translation: staff see both, and the AI reads both — the original keeps what a poor translation loses.
-    let transcript: string | null = null;
-    let forAi: string | null = null;
-    let transcriptStatus = r.transcriptStatus;
-    if (r.audioPath) {
-      try {
-        const heard = await transcribe(r.audioPath);
-        transcript = heard.english ? `${heard.text}\n\nEnglish: ${heard.english}` : heard.text;
-        forAi = heard.english ? `${heard.text}\n(English machine translation, may be inaccurate: ${heard.english})` : heard.text;
-        transcriptStatus = 'DONE';
-      } catch (e) {
-        console.warn(`Transcription failed for report ${r.id}: ${e instanceof Error ? e.message : e}`);
-        transcriptStatus = 'FAILED';
-      }
-    }
-
-    // 2–3. Structure text + transcript (BR-10, BR-11).
-    const description = [r.text, forAi].filter((s) => s && s.trim()).join('\n');
-    const { extraction, source } = await structureText(description);
-
-    // 4. Victim input overrides AI (BR-13).
-    if (r.people !== null) extraction.people = r.people;
-    extraction.needs = [...new Set([...extraction.needs, ...r.needs])];
+    // 1–4. Transcribe, structure, victim input overrides AI.
+    const { transcript, forAi, status: transcriptStatus } = await hear(r);
+    const { extraction, source } = await structure(r, forAi);
 
     // 5. Create the incident (code regenerated on collision, BR-01).
     const incident: Partial<IncidentRecord> = {

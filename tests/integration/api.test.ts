@@ -1,8 +1,8 @@
 // tests/integration/api.test.ts — API-level tests: real Express routers, real pipeline and business rules, with
 // Supabase replaced by an in-memory fake built from supabase/schema.sql, and the LLM / Whisper replaced by stubs
 // (rules.md AR-31: tests never call the LLM, Whisper or Supabase).
-import { randomUUID } from 'node:crypto';
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createHmac, randomUUID } from 'node:crypto';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../server/supabase', async () => (await import('./fakeSupabase')).supabaseModule);
 vi.mock('node-llama-cpp', async () => (await import('./stubs')).nodeLlamaCppStub);
@@ -15,6 +15,7 @@ import { processPendingReports, queueState } from '../../server/pipeline';
 import { applyCleanup, planCleanup } from '../../server/scripts/cleanup';
 import { runSeed } from '../../server/scripts/seed';
 import { CODE_ALPHABET, DEMO_CENTER, DEMO_OTP } from '../../shared/constants';
+import { encodeSmsReport } from '../../shared/sms';
 import type { ReportSubmission } from '../../shared/types';
 import { fakeAuth, fakeDb, fakeStorage, resetFakeSupabase } from './fakeSupabase';
 import { llm, resetStubs, speech } from './stubs';
@@ -890,5 +891,176 @@ describe('Live change signals (Server-Sent Events, architecture D12)', () => {
     await vi.waitFor(() => expect(openStreamCount()).toBe(before + 1));
     s.close();
     await vi.waitFor(() => expect(openStreamCount()).toBe(before));
+  });
+});
+
+// ------------------------------------------------------------------------------------------------ F27 SMS fallback
+
+describe('Reports by SMS (F27, BR-06, BR-07)', () => {
+  const SECRET = 'test-sms-secret';
+  const GATEWAY = 'http://gateway.test:8080';
+  let replies: { to: string; text: string }[];
+
+  /** What "SMS Gateway for Android" posts for one received SMS. */
+  const received = (sender: string, message: string) => ({
+    deviceId: 'gateway-phone', event: 'sms:received', id: randomUUID(), webhookId: 'hook-1',
+    payload: { messageId: randomUUID(), message, sender, recipient: null, simNumber: 1, receivedAt: new Date().toISOString() },
+  });
+  /** Its signature: HMAC-SHA256 over the raw body + X-Timestamp, with the signing key set in the app. */
+  const signed = (body: unknown, key = SECRET) => {
+    const ts = String(Math.floor(Date.now() / 1000));
+    return { headers: { 'x-timestamp': ts, 'x-signature': createHmac('sha256', key).update(JSON.stringify(body) + ts).digest('hex') } };
+  };
+  const sms = (body: unknown, opts: { headers?: Record<string, string> } = signed(body)) => server.call('POST', '/sms/incoming', body, opts);
+  const byCode = (code: string) => table('reports').find((r) => r.code === code)!;
+
+  beforeEach(() => {
+    process.env.SMS_WEBHOOK_SECRET = SECRET;
+    process.env.SMS_GATEWAY_URL = GATEWAY;
+    replies = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      expect(String(url)).toBe(`${GATEWAY}/message`);
+      const body = JSON.parse(String(init?.body));
+      replies.push({ to: body.phoneNumbers[0], text: body.textMessage.text });
+      return new Response(null, { status: 202 });
+    });
+  });
+  afterEach(() => {
+    delete process.env.SMS_WEBHOOK_SECRET;
+    delete process.env.SMS_GATEWAY_URL;
+    vi.mocked(globalThis.fetch).mockRestore();
+  });
+
+  it('is off without SMS_WEBHOOK_SECRET, and refuses unsigned, wrongly signed or wrong-secret requests', async () => {
+    const body = received('+919840011111', 'Water in our street');
+    delete process.env.SMS_WEBHOOK_SECRET;
+    expect((await sms(body)).status).toBe(404);
+    process.env.SMS_WEBHOOK_SECRET = SECRET;
+    expect((await sms(body, {})).status).toBe(401);
+    expect((await sms(body, signed(body, 'wrong-key'))).status).toBe(401);
+    expect((await sms({ from: '+919840011111', text: 'Water' }, { headers: { authorization: 'Bearer wrong' } })).status).toBe(401);
+    expect(table('reports')).toHaveLength(0);
+
+    // Any other gateway: {from, text} with the secret as a bearer token.
+    const plain = await sms({ from: '+919840011111', text: 'Water in our street' }, { headers: { authorization: `Bearer ${SECRET}` } });
+    expect(plain.status, plain.raw).toBe(200);
+    expect(plain.body.outcome).toBe('CREATED');
+  });
+
+  it("turns the app's SMS into a report with the phone's code and PIN, replies once, and never duplicates it", async () => {
+    const sub = submission({ people: 3, needs: ['RESCUE'], photoBase64: JPEG, audioBase64: WEBM, audioMime: 'audio/webm', audioSeconds: 5 });
+    const body = received('+919840011111', encodeSmsReport(sub));
+    const res = await sms(body);
+    expect(res.status, res.raw).toBe(200);
+    expect(res.body).toEqual({ ok: true, outcome: 'CREATED', code: sub.code });
+
+    const report = await processed(byCode(sub.code).id);
+    expect(report).toMatchObject({
+      channel: 'SMS', pin: sub.pin, text: sub.text, lat: sub.lat, lng: sub.lng, people: 3, needs: ['RESCUE'],
+      pending_media: ['AUDIO', 'PHOTO'], phone: '+919840011111', phone_verified: true, processing_status: 'DONE',
+    });
+    const incident = one('incidents', report.incident_id);
+    expect(incident).toMatchObject({ type: 'FLOOD', trapped: true, vulnerable: true });
+    expect(replies).toEqual([{ to: '+919840011111', text: expect.stringContaining(`report ${sub.code} received`) }]);
+
+    // The gateway delivers the same SMS again, and the victim presses send twice: still one report, no second reply.
+    expect((await sms(body)).body.outcome).toBe('ALREADY_RECEIVED');
+    expect((await sms(received('+919840011111', encodeSmsReport(sub)))).body.outcome).toBe('ALREADY_RECEIVED');
+    expect(table('reports')).toHaveLength(1);
+    expect(replies).toHaveLength(1);
+
+    // Tracking with the code and PIN the phone shows works, and the coordinator sees where it came from.
+    expect((await server.call('POST', '/track', { code: sub.code, pin: sub.pin })).status).toBe(200);
+    expect((await adminCall('GET', '/incidents')).body.incidents[0].viaSms).toBe(true);
+    const detail = await adminCall('GET', `/incidents/${incident.id}`);
+    expect(detail.body.reports[0]).toMatchObject({ channel: 'SMS', pendingMedia: ['AUDIO', 'PHOTO'], completedAt: null, phoneVerified: true });
+  });
+
+  it('the full report from the app later completes the SMS report: media, full text, new facts, no second report (BR-07)', async () => {
+    const sub = submission({ photoBase64: JPEG, audioBase64: WEBM, audioMime: 'audio/webm', audioSeconds: 5 });
+    await sms(received('+919840011111', encodeSmsReport(sub)));
+    const smsReport = await processed(byCode(sub.code).id);
+    expect(one('incidents', smsReport.incident_id).medical).toBe(false);
+
+    speech.result = { text: 'My grandmother is unconscious', language: 'en', english: null };
+    const upload = await server.call('POST', '/reports', sub); // the outbox, once the phone is online
+    expect(upload.status, upload.raw).toBe(200);
+    expect(upload.body).toEqual({ ok: true, code: sub.code });
+
+    const done = await processed(smsReport.id);
+    expect(done).toMatchObject({
+      channel: 'SMS', device_id: sub.deviceId, pending_media: [], transcript: 'My grandmother is unconscious', transcript_status: 'DONE',
+      photo_path: `reports/${smsReport.id}/photo.jpg`, audio_path: `reports/${smsReport.id}/audio.webm`, processing_status: 'DONE',
+    });
+    expect(done.completed_at).toBeTruthy();
+    expect(table('reports')).toHaveLength(1);
+    expect(table('incidents')).toHaveLength(1);
+    const incident = one('incidents', done.incident_id);
+    expect(incident.medical).toBe(true); // from the voice note that could not go by SMS
+    expect(logsOf(incident.id).map((l) => l.text)).toEqual(expect.arrayContaining([
+      'Full report arrived from the app with the photo and voice note',
+      expect.stringMatching(/^New details added: .*medical/),
+    ]));
+
+    // The outbox resends (it never saw the answer): nothing changes. Another phone's report with this code: CODE_TAKEN.
+    expect((await server.call('POST', '/reports', sub)).status).toBe(200);
+    expect(one('reports', smsReport.id).completed_at).toBe(done.completed_at);
+    expect((await server.call('POST', '/reports', submission({ code: sub.code, pin: '0000' }))).status).toBe(409);
+    expect(table('reports')).toHaveLength(1);
+  });
+
+  it('plain words from any phone: a new code and PIN are sent back; follow-ups within the hour add to that report', async () => {
+    const first = await sms(received('+919840022222', 'Water inside our house near Lake Road'));
+    expect(first.body.outcome).toBe('CREATED');
+    const report = await processed(byCode(first.body.code).id);
+    expect(report).toMatchObject({ channel: 'SMS', lat: null, phone: '+919840022222', processing_status: 'DONE' });
+    expect(report.pin).toMatch(/^\d{4}$/);
+    expect(replies).toEqual([{ to: '+919840022222', text: expect.stringContaining(`Code ${report.code} PIN ${report.pin}`) }]);
+    expect(one('incidents', report.incident_id).vulnerable).toBe(false);
+
+    const followUp = received('+919840022222', 'My father cannot walk');
+    expect((await sms(followUp)).body).toEqual({ ok: true, outcome: 'ADDED', code: report.code });
+    const updated = await processed(report.id);
+    expect(updated.text).toBe('Water inside our house near Lake Road\nMy father cannot walk');
+    expect(one('incidents', report.incident_id).vulnerable).toBe(true);
+    expect(logsOf(report.incident_id).map((l) => l.text)).toContain('Follow-up SMS added to a report');
+
+    // Delivered twice by the gateway: added once. Follow-ups get no reply (an auto-reply must not start a loop).
+    expect((await sms(followUp)).body.outcome).toBe('ALREADY_RECEIVED');
+    expect(one('reports', report.id).text.match(/cannot walk/g)).toHaveLength(1);
+    expect(table('reports')).toHaveLength(1);
+    expect(replies).toHaveLength(1);
+  });
+
+  it('ignores operator messages and other gateway events', async () => {
+    expect((await sms(received('JX-JIOINF', 'Your data pack expires today'))).body.outcome).toBe('IGNORED');
+    const sent = { ...received('+919840011111', 'x'), event: 'sms:sent' };
+    expect((await sms(sent)).body.outcome).toBe('IGNORED');
+    expect((await sms(received('+919840011111', '   '))).body.outcome).toBe('IGNORED');
+    expect(table('reports')).toHaveLength(0);
+    expect(replies).toHaveLength(0);
+  });
+
+  it('never changes a report while it is being processed: the change is refused with a retryable 500', async () => {
+    const sub = submission({ audioBase64: WEBM, audioMime: 'audio/webm', audioSeconds: 5 });
+    await sms(received('+919840033333', encodeSmsReport(sub)));
+    const smsReport = await processed(byCode(sub.code).id);
+
+    let release!: () => void;
+    speech.gate = new Promise((resolve) => (release = resolve)); // hold the late voice note in "transcribing"
+    try {
+      expect((await server.call('POST', '/reports', sub)).status).toBe(200);
+      await vi.waitFor(() => expect(speech.calls).toHaveLength(1));
+      // Meanwhile the victim's tracking page keeps its step (it does not fall back to "Report received").
+      expect((await server.call('POST', '/track', { code: sub.code, pin: sub.pin })).body.step).toBe('REVIEWING');
+      const busy = await sms(received('+919840033333', 'Water is at the second step now'));
+      expect(busy.status).toBe(500); // the gateway sends it again later
+    } finally {
+      release();
+    }
+    await processed(smsReport.id);
+    expect((await sms(received('+919840033333', 'Water is at the second step now'))).body.outcome).toBe('ADDED');
+    expect((await processed(smsReport.id)).text).toContain('second step');
+    expect(server.errors).toEqual([]);
   });
 });

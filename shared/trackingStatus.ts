@@ -1,17 +1,18 @@
 // shared/trackingStatus.ts — internal state → victim-facing step (rules.md BR-90, BR-91).
 import { EMERGENCY_NUMBER } from './constants';
-import type { AssignmentStatus, IncidentStatus, ProcessingStatus, VictimStep } from './types';
+import type { AssignmentStatus, IncidentStatus, VictimStep } from './types';
 import { ACTIVE_ASSIGNMENT } from './types';
 
 export interface TrackingInput {
-  processingStatus: ProcessingStatus;
+  /** The report's incident; null until the report is first processed. */
   incident: { status: IncidentStatus; verifiedAt: string | null } | null;
   /** Assignments of the incident, newest last. */
   assignments: { status: AssignmentStatus }[];
 }
 
 export function victimStep(t: TrackingInput): VictimStep {
-  if (t.processingStatus === 'PENDING' || !t.incident) return 'RECEIVED';
+  // A linked report follows its incident, also while later details are read (BR-07: processing is PENDING again).
+  if (!t.incident) return 'RECEIVED';
   if (t.incident.status === 'REJECTED') return 'CLOSED';
   if (t.incident.status === 'RESOLVED') return 'RESOLVED';
   const active = t.assignments.find((a) => ACTIVE_ASSIGNMENT.includes(a.status));

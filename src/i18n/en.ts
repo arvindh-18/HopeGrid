@@ -118,6 +118,15 @@ export const en = {
   'sent.track': 'Track this report',
   'sent.home': 'Back to home',
 
+  'sms.title': 'No internet? Send it by SMS',
+  'sms.body': 'An SMS can get through with weak signal and no mobile data. Your SMS app opens with the report ready — just press send.',
+  'sms.mediaLater': "Photos and voice notes can't go by SMS. They upload by themselves when you're back online.",
+  'sms.button': 'Send by SMS',
+  'sms.again': 'Open the SMS again',
+  'sms.opened': "If you pressed send, the team gets your report by SMS. Keep this app: it still sends the full report when you're online.",
+  'sms.to': 'To {n}. Normal SMS charges apply.',
+  'sms.addWords': "No internet? Type a few words too: if you send by SMS, the voice note can't go with it.",
+
   'track.reportN': 'Report {code}',
   'track.viewReport': 'View report',
   'track.notSentYet': "This report hasn't been sent yet. It will send automatically when you're back online, and then you can track it here.",

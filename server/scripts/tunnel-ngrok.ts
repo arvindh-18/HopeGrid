@@ -61,7 +61,9 @@ const onOutput = async (chunk: Buffer) => {
     const body = await res.json().catch(() => null);
     console.log(Array.isArray(body?.incidents)
       ? `Check: the HopeGrid server answers through the tunnel (${body.incidents.length} public hazard(s)).`
-      : `Check: the tunnel works but the server answered ${res.status}. Is \`npm start\` running?`);
+      : res.status >= 500 && body?.error
+        ? `Check: the tunnel works, but the server failed (${res.status}). See the \`npm start\` window; usually the database: the Supabase values in .env, or schema.sql not run in that project.`
+        : `Check: the tunnel works but the server answered ${res.status}. Is \`npm start\` running?`);
   } catch {
     console.log('Check: no answer through the tunnel yet. Is `npm start` running on this laptop?');
   }

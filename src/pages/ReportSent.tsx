@@ -1,11 +1,14 @@
-// S03 Report sent — code + PIN, sync status and the offline keyword preview (features.md F02, F05).
+// S03 Report sent — code + PIN, sync status, "Send by SMS" while unsent (F27) and the offline keyword preview
+// (features.md F02, F05).
 import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { keywordExtractor } from '../../shared/keywordExtractor';
-import { IconCheck, IconCopy, IconMic, IconRefresh, IconWifiOff } from '../components/Icons';
+import { encodeSmsReport } from '../../shared/sms';
+import { IconCheck, IconCopy, IconMic, IconRefresh, IconSend, IconWifiOff } from '../components/Icons';
 import { Layout } from '../components/Layout';
 import { Button, EmptyState, LoadingBlock, Notice, Spinner, useToast } from '../components/ui';
 import { useI18n } from '../i18n';
+import { SMS_NUMBER, smsHref } from '../lib/sms';
 import * as outbox from '../offline/outbox';
 import { useOnline } from '../offline/useOnline';
 
@@ -98,6 +101,23 @@ export default function ReportSent() {
               ? t('sent.sending')
               : t('sent.savedOffline')}
           </Notice>
+        )}
+
+        {item.status !== 'SENT' && SMS_NUMBER && (
+          <section className="card card-pad flex flex-col gap-3" aria-labelledby="by-sms">
+            <h2 id="by-sms" className="t-title-sm">{t('sms.title')}</h2>
+            <p className="t-body-sm text-muted">{t('sms.body')}</p>
+            {(s.photoBase64 || s.audioBase64) && <p className="t-body-sm text-muted">{t('sms.mediaLater')}</p>}
+            <a
+              href={smsHref(SMS_NUMBER, encodeSmsReport(s))}
+              onClick={() => void outbox.markSms(item.id)}
+              className={`btn ${item.status === 'SENDING' ? 'btn-outline' : 'btn-danger'} btn-lg btn-block`}
+            >
+              <IconSend size={18} /> {item.smsAt ? t('sms.again') : t('sms.button')}
+            </a>
+            {item.smsAt && <p className="t-body-sm" role="status">{t('sms.opened')}</p>}
+            <p className="t-caption">{t('sms.to', { n: SMS_NUMBER })}</p>
+          </section>
         )}
 
         <section className="card card-pad" aria-labelledby="understood">

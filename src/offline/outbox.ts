@@ -15,6 +15,8 @@ export interface OutboxItem {
   error: string | null;
   createdAt: string;
   sentAt: string | null;
+  /** When the person last opened the SMS app with this report (F27). Whether they pressed send is unknown. */
+  smsAt?: string | null;
 }
 
 const KEY = 'outbox';
@@ -66,6 +68,13 @@ export async function enqueue(submission: ReportSubmission): Promise<OutboxItem>
 export async function remove(id: string): Promise<void> {
   await ensureLoaded();
   items = items.filter((i) => i.id !== id);
+  await persist();
+}
+
+/** F27: the person tapped "Send by SMS". The item stays queued: the full report still uploads when online (BR-07). */
+export async function markSms(id: string): Promise<void> {
+  await ensureLoaded();
+  update(id, { smsAt: new Date().toISOString() });
   await persist();
 }
 

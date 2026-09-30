@@ -26,6 +26,13 @@ export const MAX_AUDIO_BASE64 = 3_000_000;
 export const AI_TIMEOUT_MS = 30_000;
 export const WHISPER_TIMEOUT_MS = 60_000;
 
+// BR-06 / BR-07 SMS fallback (F27)
+export const SMS_TEXT_MAX_CHARS = 200;      // description packed into the SMS; the full text follows with the app upload
+export const SMS_LOCATION_MAX_CHARS = 80;
+export const MAX_REPORT_TEXT = 2000;        // report text, including follow-up SMS added to it
+export const SMS_FOLLOWUP_MINUTES = 60;     // a plain SMS from the same number within this time adds to its report
+export const SMS_REPLY_TIMEOUT_MS = 10_000;
+
 export const OUTBOX_RETRY_MS = 15_000;
 export const POLL_ADMIN_MS = 5_000;
 export const POLL_VOLUNTEER_MS = 5_000;

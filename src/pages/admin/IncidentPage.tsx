@@ -341,12 +341,19 @@ function ReportCard({ r }: { r: AdminReport }) {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="font-medium text-ink">{r.label}</p>
         <div className="flex flex-wrap items-center gap-2">
+          {r.channel === 'SMS' && <Tag tone="info">✉️ By SMS</Tag>}
           {r.processingStatus === 'PENDING' && <Tag tone="info"><Spinner size={12} /> Processing</Tag>}
           {r.aiSource && <Tag tone={r.aiSource === 'AI' ? 'lime' : 'neutral'}>{r.aiSource === 'AI' ? 'Structured by AI' : 'Structured by keywords'}</Tag>}
           <span className="t-caption">{clockTime(r.createdAt)}{r.receivedAt.slice(0, 16) !== r.createdAt.slice(0, 16) ? `, received ${clockTime(r.receivedAt)}` : ''}</span>
         </div>
       </div>
-      {r.text && <p className="mt-2 text-[15px]">"{r.text}"</p>}
+      {r.text && <p className="mt-2 whitespace-pre-line text-[15px]">"{r.text}"</p>}
+      {r.pendingMedia.length > 0 && (
+        <p className="mt-2 t-body-sm text-[#924400]">
+          The {r.pendingMedia.map((m) => (m === 'AUDIO' ? 'voice note' : 'photo')).join(' and ')} could not go by SMS. It is still on the reporter's phone and uploads when that phone is online.
+        </p>
+      )}
+      {r.completedAt && <p className="mt-2 t-caption">Full report arrived from the app at {clockTime(r.completedAt)}.</p>}
       {r.audioUrl && (
         <div className="mt-3 rounded-[10px] bg-canvas p-3">
           <p className="mb-2 flex items-center gap-2 t-caption"><IconMic size={14} /> Voice note{r.audioSeconds ? `, ${r.audioSeconds} s` : ''}</p>

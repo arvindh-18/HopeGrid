@@ -8,13 +8,14 @@ import { fileURLToPath } from 'node:url';
 import { ApiError, type ErrorCode } from '../shared/types';
 import { loadAiModel } from './ai';
 import { appCors } from './cors';
-import { processPendingReports } from './pipeline';
+import { checkSchema, processPendingReports } from './pipeline';
 import { adminRouter } from './routes/admin';
 import { applicationsRouter } from './routes/applications';
 import { authRouter } from './routes/authRoutes';
 import { devRouter } from './routes/dev';
 import { messagesRouter } from './routes/messages';
 import { publicRouter } from './routes/public';
+import { smsRouter } from './routes/sms';
 import { victimRouter } from './routes/victim';
 import { volunteerRouter } from './routes/volunteer';
 import { loadWhisper } from './transcribe';
@@ -34,6 +35,7 @@ const HTTP_STATUS: Record<ErrorCode, number> = {
 
 const app = express();
 app.use('/api', appCors); // the Android app calls from https://localhost
+app.use('/api/sms', smsRouter); // before the JSON parser: the gateway's signature covers the raw body (F27)
 app.use(express.json({ limit: '15mb' }));
 
 app.use('/api', victimRouter);
@@ -81,6 +83,8 @@ app.listen(port, () => {
     () => console.log(`${name} ready`),
     (e) => console.warn(`${name} unavailable: ${e instanceof Error ? e.message : e}`),
   );
+  checkSchema().catch((e) => console.warn(e instanceof Error ? e.message : e));
+  if (process.env.SMS_WEBHOOK_SECRET?.trim()) console.log('SMS reports on: POST /api/sms/incoming');
   Promise.all([warm('AI model', loadAiModel), warm('Speech model', loadWhisper)])
     .then(processPendingReports)
     .catch((e) => console.error('Processing pending reports failed:', e));

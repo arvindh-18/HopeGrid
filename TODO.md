@@ -31,6 +31,19 @@ Background for every item is in `PROJECT.md` (kept in ~/Downloads) and in `CHANG
 - [ ] Check whether the report you submitted earlier ("I don't see it in Supabase") is still stuck in your phone or
       browser outbox. Open the app on that device; Home shows "unsent reports" if it is.
 
+- [ ] **Run `supabase/schema.sql` again for reports by SMS (F27).** It adds `channel`, `pending_media` and
+      `completed_at` to `reports` (safe to re-run; nothing is deleted). Until then the server prints a warning at
+      startup and the coordinator dashboard can't load.
+
+### Reports by SMS (F27)
+- [ ] Get an Android phone with a SIM for the gateway. Install "SMS Gateway for Android" and switch on Local Server.
+- [ ] Fill in `.env`: `VITE_SMS_NUMBER` (the gateway's number), and `SMS_GATEWAY_URL` / `_USER` / `_PASSWORD` from
+      the app. `SMS_WEBHOOK_SECRET` is already generated: paste the same value into the app (Settings → Webhooks →
+      Signing Key). On Vercel, add `VITE_SMS_NUMBER` under Environment Variables.
+- [ ] `npm start`, then `npm run sms:connect` (or `-- --usb` with a cable). Rebuild: `npm run build`, `npm run app:apk`.
+- [ ] Test: text plain words to the gateway from another phone, then a "Send by SMS" report with mobile data off,
+      then turn data on and check the photo/voice note join the same report.
+
 ### Running the app
 - [ ] **Restart the dev server.** Stop the old Vite still running on port 5173 (started 09:26), then run `npm run dev`.
       It predates the package changes and the new language files.

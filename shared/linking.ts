@@ -1,8 +1,9 @@
-// shared/linking.ts — duplicates, related incidents (cascade) and merge field rules (BR-40…BR-52).
+// shared/linking.ts — duplicates, related incidents (cascade), merge field rules (BR-40…BR-52) and details that
+// arrive later for a report (BR-07).
 import {
   DUP_CLOSE_DISTANCE_M, DUP_MAX_DISTANCE_M, DUP_MAX_HOURS, RELATED_MAX_DISTANCE_M, RELATED_MAX_HOURS, STOPWORDS,
 } from './constants';
-import type { IncidentStatus, IncidentType, Need, PriorityLevel } from './types';
+import type { Extraction, IncidentStatus, IncidentType, Need, PriorityLevel } from './types';
 import { ACTIVE_STATUSES, SITUATION_TYPES } from './types';
 
 // ---------- Geo ----------
@@ -172,4 +173,45 @@ export function mergeFields(t: MergeableIncident, s: MergeableIncident): Mergeab
     priorityOverride: t.priorityOverride ?? s.priorityOverride,
     overrideReason: t.priorityOverride ? t.overrideReason : s.overrideReason,
   };
+}
+
+// ---------- Later details (BR-07) ----------
+export type LaterFactsIncident = Pick<MergeableIncident,
+  'type' | 'people' | 'vulnerable' | 'trapped' | 'medical' | 'danger' | 'needs' | 'locationText' | 'summary'>;
+
+/**
+ * BR-07: what a report's later details (the full report after an SMS, a follow-up SMS) add to its incident. They only
+ * add, like a merge (BR-50): a flag turns on, a missing value is filled, a hazard type replaces a situation type, a
+ * larger people count wins, needs are added. Nothing is removed or lowered. `added` lists the changes for the log;
+ * `label` turns enum values into words (humanize).
+ */
+export function laterFacts(i: LaterFactsIncident, x: Extraction, label: (v: string) => string): { patch: Partial<LaterFactsIncident>; added: string[] } {
+  const patch: Partial<LaterFactsIncident> = {};
+  const added: string[] = [];
+  if (SITUATION_TYPES.includes(i.type) && !SITUATION_TYPES.includes(x.type)) {
+    patch.type = x.type;
+    added.push(`type ${label(x.type)}`);
+  }
+  if (x.people !== null && (i.people === null || x.people > i.people)) {
+    patch.people = x.people;
+    added.push(`${x.people} people`);
+  }
+  const flags = { vulnerable: x.vulnerable || x.mobilityIssue, trapped: x.trapped, medical: x.medical, danger: x.danger };
+  for (const k of ['trapped', 'vulnerable', 'medical', 'danger'] as const) {
+    if (flags[k] && !i[k]) {
+      patch[k] = true;
+      added.push(k);
+    }
+  }
+  const newNeeds = x.needs.filter((n) => !i.needs.includes(n));
+  if (newNeeds.length) {
+    patch.needs = [...i.needs, ...newNeeds];
+    added.push(`needs ${newNeeds.map(label).join(', ')}`);
+  }
+  if (!i.locationText && x.places[0]) {
+    patch.locationText = x.places[0];
+    added.push(`place ${x.places[0]}`);
+  }
+  if (!i.summary && x.summary) patch.summary = x.summary; // not listed: the summary shows on the incident itself
+  return { patch, added };
 }

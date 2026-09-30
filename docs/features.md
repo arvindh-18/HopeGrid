@@ -1,6 +1,6 @@
 # features.md — Hyperlocal HopeGrid Platform (Hackathon MVP v3)
 
-> **Purpose of this file:** WHAT to build: every feature (`F01`–`F26`), every screen (`S01`–`S13`), acceptance checks, and the demo scenario that proves the product works.
+> **Purpose of this file:** WHAT to build: every feature (`F01`–`F27`), every screen (`S01`–`S13`), acceptance checks, and the demo scenario that proves the product works.
 > **Structure, files, database and API:** see `architecture.md`. **Behaviour rules (`BR-*`) and agent rules (`AR-*`):** see `rules.md`.
 > A feature is done only when every acceptance check passes against the real backend.
 
@@ -36,8 +36,9 @@
 | F24 | Live dictation while speaking (online only) | COULD | Victim | hooks/useLiveDictation.ts | F01 |
 | F25 | Victim screens in Tamil and Hindi | SHOULD | Victim | src/i18n/ | F01, F02, F06, F19 |
 | F26 | Volunteer self-registration with ID proof | SHOULD | Volunteer, Admin | pages/VolunteerRegister.tsx, pages/admin/Volunteers.tsx, server/routes/applications.ts | F11, F14, F16 |
+| F27 | Reports by SMS without internet (gateway phone) | MUST | Victim, System | shared/sms.ts, lib/sms.ts, ReportSent.tsx, server/routes/sms.ts, server/pipeline.ts | F01, F02, F05 |
 
-**Out of scope (do not build):** victim accounts, automatic ID checking (a coordinator looks at the photo), editing an application after sending it, video upload, push notifications, real SMS, real calls or number masking, real emergency-service integration, offline admin/volunteer actions, multiple volunteers on one incident, undo merge, analytics, translating the staff (admin/volunteer) screens.
+**Out of scope (do not build):** victim accounts, automatic ID checking (a coordinator looks at the photo), editing an application after sending it, video upload, push notifications, SMS other than F27 (no SMS OTP, no status-update SMS), sending the SMS from inside the app (the phone's own SMS app sends it), real calls or number masking, real emergency-service integration, offline admin/volunteer actions, multiple volunteers on one incident, undo merge, analytics, translating the staff (admin/volunteer) screens.
 
 ---
 
@@ -266,13 +267,29 @@
 
 ---
 
+### F27 — Reports by SMS without internet
+**Goal:** a report reaches the coordinators when the phone has signal but no mobile data, and from basic phones.
+**Behaviour** (BR-06, BR-07):
+1. S03, while the report is not sent and the build has `VITE_SMS_NUMBER`: card "No internet? Send it by SMS" with "Send by SMS" (opens the SMS app with the packed report to that number), a note that photos and voice notes follow when online, and "To <number>. Normal SMS charges apply." After a tap: "Open the SMS again" and "If you pressed send, the team gets your report by SMS…".
+2. S02: with a voice note and almost no text, a hint to type a few words too (an SMS can't carry the voice note).
+3. The gateway phone (Android, SIM, "SMS Gateway for Android") forwards each received SMS to `POST /api/sms/incoming`; `npm run sms:connect` registers it (`--usb`: over a USB cable, no internet anywhere).
+4. The report is processed like any other. The dashboard shows "✉️ SMS"; the report card shows "By SMS", the sender's number (verified), which media are still on the phone, and later "Full report arrived from the app at …".
+5. When the phone gets online, its outbox uploads the full report, which completes the SMS report (no second report) and adds any new facts.
+6. Reply SMS with the code (and the PIN for plain-word reports) when `SMS_GATEWAY_URL` is set.
+**Acceptance:**
+- [x] Airplane mode with SMS on → submit → "Send by SMS" opens the SMS app with `HG1 <code> <pin>…` addressed to the configured number (Android emulator, 2026-09-30).
+- [x] A packed SMS creates a report with the phone's code and PIN, priority and reasons; tracking with that code + PIN works (API tests).
+- [x] The later upload attaches photo + voice note to the same report; the transcript's new facts reach the incident; resending changes nothing (API tests).
+- [x] A plain-word SMS gets a code + PIN reply; a follow-up within 60 min is added to the same report (API tests).
+- [ ] A real SMS from a real phone through a real gateway phone reaches the dashboard. **TODO: needs verification** on devices.
+
 ## 3. Screens
 
 | ID | Route | Screen | User | Features |
 |---|---|---|---|---|
 | S01 | `/` | Home | Everyone | F01, F02 |
 | S02 | `/report` | Report | Victim | F01, F03, F24 |
-| S03 | `/report/sent/:id` | Report sent | Victim | F02, F05 (preview) |
+| S03 | `/report/sent/:id` | Report sent | Victim | F02, F05 (preview), F27 (send by SMS) |
 | S04 | `/track` | Track | Victim | F04, F17, F21 |
 | S05 | `/map` | Public map | Community | F19, F22 |
 | S06 | `/login` | Login | Staff | F11 |

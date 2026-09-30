@@ -245,10 +245,43 @@ Requested: turn the website into an app, plus a PDF on how to use it.
   - the APK contains the address and no Supabase keys
 - **Not yet checked through the live tunnel:** it needs the ngrok token saved on this Mac.
 
+## Reports by SMS without internet (2026-09-30, F27)
+
+Judges' feedback: reports only reached coordinators once the phone had internet. Now a report goes out by SMS
+whenever the phone has signal, even without mobile data.
+- **Phone:** "Send by SMS" on the "report saved" screen opens the phone's own SMS app with the report packed into
+  one message (`shared/sms.ts`, BR-06): code, PIN, GPS, people, needs, 80 characters of place and 200 of text.
+  The number comes from `VITE_SMS_NUMBER`. Tamil and Hindi text included.
+- **Gateway:** an Android phone with a SIM runs "SMS Gateway for Android" and forwards every SMS to the new
+  `POST /api/sms/incoming` (`server/routes/sms.ts`). It is signed with the app's HMAC signature, or uses a bearer
+  secret, and is off without `SMS_WEBHOOK_SECRET`. `npm run sms:connect` registers it; `--usb` works over a cable,
+  with no internet needed on the phone.
+- **Basic phones:** plain words become a report; the reply carries a new code and PIN. More plain SMS from the
+  same number within 60 minutes are added to that report.
+- **Later upload (BR-07):** when the phone gets online, its outbox sends the full report. It joins the SMS report
+  (same code and PIN) instead of creating a second one. The photo, voice note and full text are added, the report
+  is read again, and new facts are added to the incident (`laterFacts`: only adds, never removes). A report is never
+  changed while it is being processed; the change gets a retryable 500.
+- **Coordinators:** "✉️ SMS" on the dashboard. The report card shows "By SMS", the sender's number (verified),
+  media still on the phone, and when the full report arrived.
+- **Tracking (BR-90):** a linked report keeps its step while later details are read, instead of dropping back to
+  "Report received".
+- **Database:** `reports` gets `channel`, `pending_media` and `completed_at`, plus an index on `phone`.
+  `schema.sql` has `alter table … add column if not exists` lines for existing databases. The server warns at
+  startup if they are missing.
+- **Evidence (2026-09-30):**
+  - 114 tests pass (12 new: 6 rule tests, 6 API tests); type-check clean
+  - 5 deliberate code breaks (M17–M21), all caught
+  - Android emulator, Wi-Fi and data off: "Send by SMS" opened Google Messages with the packed report, which was
+    sent, and the server's parser reads that exact message correctly
+  - **Not yet run:** a real gateway phone, and the live database (it needs `schema.sql` re-run first)
+
 ## Only you can do these
 
 - **Rotate the Supabase keys.**
-- **Run `supabase/schema.sql` again** so the `volunteer_applications` table exists.
+- **Run `supabase/schema.sql` again** so the `volunteer_applications` table and the SMS columns (`channel`,
+  `pending_media`, `completed_at`) exist.
+- **Set up the SMS gateway phone** (README → "Reports by SMS") and test it with a real SMS.
 - **Tell me the hackathon track** (placeholder at the top of `docs/problem.md`).
 - **Check live updates through a real `npm run tunnel` link** on two phones (not tested through a live tunnel).
 - **Collect real user feedback** (plan + template: `docs/impact-and-deployment.md` §6–7).
