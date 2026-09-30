@@ -612,6 +612,95 @@ describe('Database round-trips per request (measured for docs/scaling.md)', () =
   });
 });
 
+// ------------------------------------------------------------------------------------------------ F26 volunteer registration
+
+describe('Volunteer registration (F26, BR-150)', () => {
+  const application = (over: Record<string, unknown> = {}) => ({
+    name: 'Kavya Raman', email: 'kavya@test.local', phone: '+91 98400 55555', password: 'strong-pass-1',
+    skills: ['FIRST_AID', 'SWIMMING'], equipment: ['LIFE_JACKET', 'ROPE'], vehicle: 'MOTORCYCLE',
+    lat: DEMO_CENTER.lat + 0.005, lng: DEMO_CENTER.lng, locationText: 'Anna Nagar', proofBase64: JPEG, ...over,
+  });
+  const login = (email = 'kavya@test.local', password = 'strong-pass-1') => server.call('POST', '/auth/login', { email, password });
+
+  it('applicant can register, cannot log in until approved, then becomes a matchable volunteer', async () => {
+    const res = await server.call('POST', '/volunteer-applications', application());
+    expect(res.status, res.raw).toBe(201);
+    const [row] = table('volunteer_applications');
+    expect(row).toMatchObject({ status: 'PENDING', email: 'kavya@test.local', phone: '+919840055555', skills: ['FIRST_AID', 'SWIMMING'] });
+    expect(JSON.stringify(row)).not.toContain('strong-pass-1'); // the password lives only in Supabase Auth
+    expect(fakeStorage.files.has(`media/${row.proof_path}`)).toBe(true);
+
+    const early = await login();
+    expect(early.status).toBe(401);
+    expect(early.body.error.message).toBe('Your volunteer application is waiting for a coordinator to approve it.');
+
+    const pending = await adminCall('GET', '/applications');
+    expect(pending.body).toHaveLength(1);
+    expect(pending.body[0]).toMatchObject({ name: 'Kavya Raman', equipment: ['LIFE_JACKET', 'ROPE'], hasLocation: true });
+    expect(pending.body[0].proofUrl).toContain('applications/');
+    expect(pending.raw).not.toContain('password');
+
+    expect((await adminCall('POST', `/applications/${row.id}/approve`)).status).toBe(200);
+    expect((await adminCall('POST', `/applications/${row.id}/approve`)).body.error.code).toBe('INVALID_STATE');
+    expect(one('volunteer_applications', row.id).status).toBe('APPROVED');
+
+    const ok = await login();
+    expect(ok.status).toBe(200);
+    expect(ok.body.user).toMatchObject({ name: 'Kavya Raman', role: 'VOLUNTEER' });
+    const volunteers = (await adminCall('GET', '/volunteers')).body;
+    expect(volunteers.map((v: Row) => v.name)).toContain('Kavya Raman');
+
+    const { incident } = await submit();
+    const detail = (await adminCall('GET', `/incidents/${incident.id}`)).body;
+    expect(detail.suggestions.map((sug: Row) => sug.volunteerId)).toContain(row.user_id);
+  });
+
+  it('rejecting needs a reason, removes the login and the ID proof, and lets the person apply again', async () => {
+    await server.call('POST', '/volunteer-applications', application());
+    const [row] = table('volunteer_applications');
+    expect((await adminCall('POST', `/applications/${row.id}/reject`, {})).body.error.code).toBe('VALIDATION');
+    expect((await adminCall('POST', `/applications/${row.id}/reject`, { reason: 'ID photo unreadable' })).status).toBe(200);
+    expect(one('volunteer_applications', row.id)).toMatchObject({ status: 'REJECTED', reject_reason: 'ID photo unreadable', proof_path: null });
+    expect(fakeAuth.hasUser('kavya@test.local')).toBe(false);
+    expect(fakeStorage.files.size).toBe(0);
+    expect((await login()).body.error.message).toBe('Email or password is incorrect.');
+    expect((await server.call('POST', '/volunteer-applications', application())).status).toBe(201); // may apply again
+  });
+
+  it.each([
+    ['a bad email', { email: 'not-an-email' }],
+    ['a short password', { password: 'short' }],
+    ['no skills', { skills: [] }],
+    ['an unknown skill', { skills: ['FLYING'] }],
+    ['unknown equipment', { equipment: ['JETPACK'] }],
+    ['a malformed phone number', { phone: '12ab' }],
+    ['no ID proof', { proofBase64: '' }],
+    ['a PNG instead of a JPEG proof', { proofBase64: PNG }],
+  ])('rejects an application with %s and leaves nothing behind', async (_label, over) => {
+    const res = await server.call('POST', '/volunteer-applications', application(over));
+    expect(res.status).toBe(400);
+    expect(table('volunteer_applications')).toHaveLength(0);
+    expect(fakeAuth.hasUser(String(application(over).email))).toBe(false);
+    expect(fakeStorage.files.size).toBe(0);
+  });
+
+  it('refuses a second account for an email that already exists', async () => {
+    const res = await server.call('POST', '/volunteer-applications', application({ email: ravi.email }));
+    expect(res.status).toBe(400);
+    expect(res.body.error.message).toBe('An account with this email already exists.');
+    expect(table('volunteer_applications')).toHaveLength(0);
+  });
+
+  it('only coordinators can see and review applications', async () => {
+    await server.call('POST', '/volunteer-applications', application());
+    const [row] = table('volunteer_applications');
+    expect((await server.call('GET', '/admin/applications')).status).toBe(401);
+    expect((await server.call('GET', '/admin/applications', undefined, { token: ravi.token })).status).toBe(403);
+    expect((await server.call('POST', `/admin/applications/${row.id}/approve`, {}, { token: ravi.token })).status).toBe(403);
+    expect(one('volunteer_applications', row.id).status).toBe('PENDING');
+  });
+});
+
 // ------------------------------------------------------------------------------------------------ retention clean-up
 
 describe('Retention clean-up script (server/scripts/cleanup.ts)', () => {

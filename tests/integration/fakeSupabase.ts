@@ -367,7 +367,25 @@ export class FakeAuth {
       const id = this.tokens.get(token);
       return id ? { data: { user: { id } }, error: null } : { data: { user: null }, error: { message: 'invalid JWT' } };
     },
+    admin: {
+      createUser: async ({ email, password }: { email: string; password: string; email_confirm?: boolean }) => {
+        if (this.users.has(email.toLowerCase())) {
+          return { data: { user: null }, error: { message: 'A user with this email address has already been registered' } };
+        }
+        const { id } = this.addUser(email, password);
+        return { data: { user: { id, email } }, error: null };
+      },
+      deleteUser: async (id: string) => {
+        for (const [email, u] of this.users) if (u.id === id) this.users.delete(email);
+        for (const [token, uid] of this.tokens) if (uid === id) this.tokens.delete(token);
+        return { data: {}, error: null };
+      },
+    },
   };
+  /** Test helper: is there a login for this email? */
+  hasUser(email: string): boolean {
+    return this.users.has(email.toLowerCase());
+  }
   // Anon API used for staff sign-in
   readonly anon = {
     signInWithPassword: async ({ email, password }: { email: string; password: string }) => {

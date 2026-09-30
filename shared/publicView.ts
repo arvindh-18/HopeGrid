@@ -87,6 +87,12 @@ export function toPublicIncident(i: PublicSourceIncident): PublicIncident {
   };
 }
 
+/** BR-85 — the hazards within radiusM of the device (shown on the map), and how many are farther away (hidden). */
+export function withinRadius(list: PublicIncident[], lat: number, lng: number, radiusM: number): { inside: PublicIncident[]; fartherCount: number } {
+  const inside = list.filter((p) => distanceMeters(lat, lng, p.lat, p.lng) <= radiusM);
+  return { inside, fartherCount: list.length - inside.length };
+}
+
 /** BR-82 — hazards (RED/ORANGE) within NEARBY_RADIUS_M of the device. */
 export function nearbyHazards(list: PublicIncident[], lat: number, lng: number): PublicIncident[] {
   return list.filter(

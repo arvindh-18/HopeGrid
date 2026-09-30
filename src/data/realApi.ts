@@ -71,6 +71,12 @@ export const realApi: Api = {
   updateAssignmentStatus: (assignmentId, status, reason) => post(`/volunteer/assignments/${id(assignmentId)}/status`, { status, reason }),
   getAssignmentChat: (assignmentId) => get(`/volunteer/assignments/${id(assignmentId)}/chat`),
   sendVolunteerMessage: (assignmentId, reportId, msg) => post(`/volunteer/assignments/${id(assignmentId)}/chat`, { reportId, ...msg }),
+  // Volunteer registration (F26)
+  applyAsVolunteer: (input) => post('/volunteer-applications', input),
+  listApplications: (status) => get(`/admin/applications?status=${id(status)}`),
+  approveApplication: (applicationId) => post(`/admin/applications/${id(applicationId)}/approve`),
+  rejectApplication: (applicationId, reason) => post(`/admin/applications/${id(applicationId)}/reject`, { reason }),
+  listVolunteers: () => get('/admin/volunteers'),
   // Dev
   resetDemo: () => post('/dev/reset'),
   // Live change signals

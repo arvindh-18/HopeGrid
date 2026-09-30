@@ -1,6 +1,6 @@
 // S06 Staff login — seeded admin and volunteer accounts (features.md F11).
 import { useState, type FormEvent } from 'react';
-import { Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { DEMO_ADMIN_EMAIL, DEMO_PASSWORD, DEMO_VOLUNTEER_EMAIL } from '../../shared/constants';
 import { ApiError } from '../../shared/types';
 import { Layout } from '../components/Layout';
@@ -50,6 +50,7 @@ export default function Login() {
           <h1 className="t-display max-w-[12ch]">Coordinators and volunteers</h1>
           <p className="mt-4 max-w-[40ch] text-[17px] text-body">Log in to review incoming reports, assign help and update your response.</p>
           <p className="mt-6 t-caption">Reporting an emergency never needs an account.</p>
+          <p className="mt-2 t-caption">Want to volunteer? <Link to="/volunteer/register" className="text-ink">Register here</Link>. A coordinator checks your details before you can log in.</p>
         </div>
         <form onSubmit={submit} className="card card-pad flex flex-col gap-4" noValidate>
           <h2 className="t-title-md">Log in</h2>

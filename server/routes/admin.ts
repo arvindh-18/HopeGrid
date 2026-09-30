@@ -6,18 +6,18 @@ import { distanceBetween, findRelated, mergeFields } from '../../shared/linking'
 import { confidenceBand, effectivePriority, priorityRank } from '../../shared/scoring';
 import {
   ACTIVE_ASSIGNMENT, ACTIVE_STATUSES, ApiError, INCIDENT_TYPES, NEEDS, PRIORITY_LEVELS, RESOURCE_CATEGORIES,
-  type AllocationRecord, type AssignmentRecord, type IncidentDetail, type IncidentListItem, type IncidentRecord,
+  type AllocationRecord, type ApplicationRecord, type ApplicationStatus, type AssignmentRecord, type IncidentDetail, type IncidentListItem, type IncidentRecord,
   type IncidentType, type LogRecord, type Need, type PriorityLevel, type ProfileRecord, type ReportRecord,
-  type ResourceInput, type ResourceRecord,
+  type ResourceInput, type ResourceRecord, type VolunteerApplication, type VolunteerListItem,
 } from '../../shared/types';
 import { humanize, isEligible, rankVolunteers } from '../../shared/volunteerMatch';
-import { requireRole } from '../auth';
+import { currentUser, requireRole } from '../auth';
 import { fromRow, fromRows, toRow } from '../mappers';
 import {
   addLog, allAssignments, endAssignment, getIncident, isUuid, recomputeIncident, reportsOf, toLink, updateIncident,
 } from '../pipeline';
 import { emitChange, openStream } from '../events';
-import { signedUrls } from '../storage';
+import { removeFiles, signedUrls } from '../storage';
 import { db } from '../supabase';
 import { messagesWhere, toChatMessages } from './messages';
 
@@ -404,4 +404,67 @@ adminRouter.patch('/resources/:id', async (req, res) => {
   const { data, error } = await db.from('resources').update(toRow(patch)).eq('id', r.id).select('*').single();
   if (error) throw new Error(`Resource update failed: ${error.message}`);
   res.json(toResource(fromRow<ResourceRecord>(data)));
+});
+
+// ---------------------------------------------------------------- volunteer registration (F26, BR-150)
+
+const APPLICATION_STATUSES: ApplicationStatus[] = ['PENDING', 'APPROVED', 'REJECTED'];
+
+async function getApplication(id: string): Promise<ApplicationRecord> {
+  const [a] = isUuid(id) ? await rows<ApplicationRecord>(db.from('volunteer_applications').select('*').eq('id', id), 'Application lookup failed') : [];
+  if (!a) throw new ApiError('NOT_FOUND', 'This application does not exist.');
+  return a;
+}
+
+// GET /api/admin/applications?status=PENDING|APPROVED|REJECTED → VolunteerApplication[] (newest first)
+adminRouter.get('/applications', async (req, res) => {
+  const status = String(req.query.status ?? 'PENDING') as ApplicationStatus;
+  if (!APPLICATION_STATUSES.includes(status)) throw invalid('Unknown application status.');
+  const list = await rows<ApplicationRecord>(
+    db.from('volunteer_applications').select('*').eq('status', status).order('created_at', { ascending: false }), 'Application lookup failed');
+  const urls = await signedUrls(list.map((a) => a.proofPath));
+  res.json(list.map((a): VolunteerApplication => ({
+    id: a.id, name: a.name, email: a.email, phone: a.phone, skills: a.skills, equipment: a.equipment, vehicle: a.vehicle,
+    locationText: a.locationText, hasLocation: a.lat !== null, status: a.status, rejectReason: a.rejectReason,
+    proofUrl: a.proofPath ? urls.get(a.proofPath) ?? null : null, createdAt: a.createdAt, reviewedAt: a.reviewedAt,
+  })));
+});
+
+// POST /api/admin/applications/:id/approve → the applicant becomes a volunteer (profile row) and can log in
+adminRouter.post('/applications/:id/approve', async (req, res) => {
+  const a = await getApplication(req.params.id);
+  if (a.status !== 'PENDING') throw new ApiError('INVALID_STATE', 'This application has already been reviewed.');
+  const { error } = await db.from('profiles').insert(toRow({
+    id: a.userId, name: a.name, email: a.email, role: 'VOLUNTEER', phone: a.phone, skills: a.skills, equipment: a.equipment,
+    vehicle: a.vehicle, availability: 'AVAILABLE', lat: a.lat, lng: a.lng,
+  }));
+  if (error) throw new Error(`Creating the volunteer profile failed: ${error.message}`);
+  const upd = await db.from('volunteer_applications')
+    .update({ status: 'APPROVED', reviewed_by: currentUser(req).id, reviewed_at: nowIso() }).eq('id', a.id);
+  if (upd.error) throw new Error(`Application update failed: ${upd.error.message}`);
+  res.json({ ok: true });
+});
+
+// POST /api/admin/applications/:id/reject {reason} → login removed (they may apply again), ID proof deleted
+adminRouter.post('/applications/:id/reject', async (req, res) => {
+  const a = await getApplication(req.params.id);
+  if (a.status !== 'PENDING') throw new ApiError('INVALID_STATE', 'This application has already been reviewed.');
+  const reason = str(req.body?.reason);
+  if (!reason) throw invalid('Add a reason for rejecting this application.');
+  const removed = await db.auth.admin.deleteUser(a.userId);
+  if (removed.error) throw new Error(`Removing the login failed: ${removed.error.message}`);
+  if (a.proofPath) await removeFiles([a.proofPath]);
+  const upd = await db.from('volunteer_applications').update({
+    status: 'REJECTED', reject_reason: reason, proof_path: null, reviewed_by: currentUser(req).id, reviewed_at: nowIso(),
+  }).eq('id', a.id);
+  if (upd.error) throw new Error(`Application update failed: ${upd.error.message}`);
+  res.json({ ok: true });
+});
+
+// GET /api/admin/volunteers → VolunteerListItem[] (staff-only: includes phone numbers)
+adminRouter.get('/volunteers', async (_req, res) => {
+  const list = await rows<ProfileRecord>(db.from('profiles').select('*').eq('role', 'VOLUNTEER').order('name'), 'Volunteer lookup failed');
+  res.json(list.map((p): VolunteerListItem => ({
+    id: p.id, name: p.name, email: p.email, phone: p.phone, skills: p.skills, equipment: p.equipment, vehicle: p.vehicle, availability: p.availability,
+  })));
 });

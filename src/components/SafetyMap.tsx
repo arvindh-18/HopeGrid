@@ -1,9 +1,10 @@
 // src/components/SafetyMap.tsx — Leaflet + OpenStreetMap map with coloured hazard pins (features.md F19, BR-83).
-// Calls onTileError when tiles cannot load so the page can switch to list mode.
+// Calls onTileError when tiles cannot load so the page can switch to list mode. With a radius (BR-85) it draws that
+// circle around the user and zooms to fit it.
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { useEffect, useMemo, useRef } from 'react';
-import { MapContainer, Marker, TileLayer, useMap } from 'react-leaflet';
+import { Circle, MapContainer, Marker, TileLayer, useMap } from 'react-leaflet';
 import type { PublicIncident } from '../../shared/types';
 import { useI18n } from '../i18n';
 import { TYPE_ICON } from '../lib/labels';
@@ -12,6 +13,7 @@ interface Props {
   incidents: PublicIncident[];
   center: { lat: number; lng: number };
   user?: { lat: number; lng: number } | null;
+  radiusM?: number | null;
   selected?: string | null;
   onSelect: (code: string) => void;
   onTileError: () => void;
@@ -43,7 +45,16 @@ function Recenter({ lat, lng }: { lat: number; lng: number }) {
   return null;
 }
 
-export function SafetyMap({ incidents, center, user, selected, onSelect, onTileError }: Props) {
+// Zooms so the whole circle is visible whenever the user's position or the chosen radius changes.
+function FitRadius({ lat, lng, radiusM }: { lat: number; lng: number; radiusM: number }) {
+  const map = useMap();
+  useEffect(() => {
+    map.fitBounds(L.latLng(lat, lng).toBounds(radiusM * 2), { padding: [12, 12] });
+  }, [lat, lng, radiusM, map]);
+  return null;
+}
+
+export function SafetyMap({ incidents, center, user, radiusM, selected, onSelect, onTileError }: Props) {
   const errors = useRef(0);
   const i = useI18n();
   const reported = useRef(false);
@@ -65,6 +76,13 @@ export function SafetyMap({ incidents, center, user, selected, onSelect, onTileE
         eventHandlers={tileEvents}
       />
       <Recenter lat={center.lat} lng={center.lng} />
+      {user && radiusM && (
+        <>
+          <Circle center={[user.lat, user.lng]} radius={radiusM} interactive={false}
+            pathOptions={{ color: '#014adb', weight: 1.5, dashArray: '6 6', fillColor: '#014adb', fillOpacity: 0.04 }} />
+          <FitRadius lat={user.lat} lng={user.lng} radiusM={radiusM} />
+        </>
+      )}
       {user && <Marker position={[user.lat, user.lng]} icon={userIcon} title={i.t('map.youAreHere')} keyboard={false} />}
       {incidents.map((p) => (
         <Marker

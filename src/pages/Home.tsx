@@ -78,6 +78,8 @@ export default function Home() {
       </div>
       <p className="mt-12 t-caption">
         {rich('home.staff', { link: <Link to="/login" className="text-ink">{t('nav.staffLogin')}</Link> })}
+        <br />
+        {rich('home.volunteer', { link: <Link to="/volunteer/register" className="text-ink">{t('home.volunteerLink')}</Link> })}
       </p>
     </Layout>
   );

@@ -4,6 +4,7 @@ import type {
   ChatMessage, ChatThread, IncidentDetail, IncidentListItem, IncidentPatch, OutgoingMessage, PriorityLevel,
   PublicIncident, ReportSubmission, Resource, ResourceInput, SessionUser, TrackView, UnableReason,
   AssignmentStatus, VolunteerAssignment, VolunteerProfile, VolunteerProfilePatch,
+  ApplicationStatus, VolunteerApplication, VolunteerApplicationInput, VolunteerListItem,
 } from '../../shared/types';
 import { realApi } from './realApi';
 
@@ -44,6 +45,12 @@ export interface Api {
   updateAssignmentStatus(id: string, status: AssignmentStatus, reason?: UnableReason | string): Promise<VolunteerAssignment>;
   getAssignmentChat(id: string): Promise<{ open: boolean; threads: ChatThread[] }>;
   sendVolunteerMessage(id: string, reportId: string, msg: OutgoingMessage): Promise<ChatMessage>;
+  // Volunteer registration (F26)
+  applyAsVolunteer(input: VolunteerApplicationInput): Promise<{ ok: true }>;
+  listApplications(status: ApplicationStatus): Promise<VolunteerApplication[]>;
+  approveApplication(id: string): Promise<{ ok: true }>;
+  rejectApplication(id: string, reason: string): Promise<{ ok: true }>;
+  listVolunteers(): Promise<VolunteerListItem[]>;
   // Dev
   resetDemo(): Promise<{ ok: true }>;
   // Live change signals (Server-Sent Events, architecture D12). Each returns an unsubscribe function. `onLive`

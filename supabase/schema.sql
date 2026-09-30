@@ -141,6 +141,29 @@ create table if not exists incident_logs (
 );
 create index if not exists incident_logs_incident_id_idx on incident_logs (incident_id);
 
+-- 6.8 Volunteer registration (F26). The applicant's login is created at sign-up, but without a profile row it can't
+-- be used; approving the application creates the profile. The ID proof photo is in the private media bucket.
+create table if not exists volunteer_applications (
+  id            uuid primary key default gen_random_uuid(),
+  user_id       uuid not null,                      -- Supabase auth user created at sign-up
+  name          text not null,
+  email         text not null,
+  phone         text not null,
+  skills        text[] not null default '{}',
+  equipment     text[] not null default '{}',
+  vehicle       text not null default 'NONE',
+  lat           double precision,
+  lng           double precision,
+  location_text text,
+  proof_path    text,                               -- cleared when the proof is deleted (on rejection)
+  status        text not null default 'PENDING',    -- PENDING | APPROVED | REJECTED
+  reject_reason text,
+  reviewed_by   uuid,
+  reviewed_at   timestamptz,
+  created_at    timestamptz not null default now()
+);
+create index if not exists volunteer_applications_status_idx on volunteer_applications (status);
+
 -- RLS on every table, no policies (architecture D6)
 alter table profiles      enable row level security;
 alter table incidents     enable row level security;
@@ -150,6 +173,7 @@ alter table messages      enable row level security;
 alter table resources     enable row level security;
 alter table allocations   enable row level security;
 alter table incident_logs enable row level security;
+alter table volunteer_applications enable row level security;
 
 -- The server's service-role key must reach these tables through the Data API
 -- (needed when the project does not auto-expose new tables).

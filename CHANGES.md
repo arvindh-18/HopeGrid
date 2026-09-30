@@ -108,13 +108,85 @@ After these: **83 tests pass** (28 rule + 55 API), **13 of 13 mutations caught**
   - `server/routes/admin.ts`
   - docs: features F14, architecture §8
 - **Tests:** `tests/whatsapp.test.ts` (2) and an API assertion; **85 tests pass**, type check and build pass.
-- **Demo note:** the seeded volunteers have no phone numbers, and there's no screen to add one. Add your teammates'
-  real numbers in Supabase (`profiles.phone`, e.g. `+9198…`), or the button explains that there's no number.
+- **Demo note:** the seeded volunteers have no phone numbers. Volunteers who register themselves (below) give one;
+  for seeded ones, add real numbers in Supabase (`profiles.phone`, e.g. `+9198…`), or the button explains that
+  there's no number.
 - Automatic sending (WhatsApp Business API, template approval, volunteer opt-in) is roadmap.
+
+## Volunteer registration with ID proof (2026-09-30)
+
+Requested: a portal where volunteers enter their details and equipment and upload a proof, which a coordinator
+checks before adding them to the volunteer list.
+
+- **Volunteer side** (`/volunteer/register`, linked from Home in all three languages and from Login):
+  - name, phone, email and password; skills; equipment; vehicle; optional GPS and area
+  - a photo of an ID proof, compressed on the phone like report photos
+  - a consent checkbox; the form lists what is still missing
+- **Coordinator side** (`/admin/volunteers`, "Volunteers" in the admin menu):
+  - *Waiting for review* (with a count): each application with its details, tags, the ID photo, Approve, and Reject
+    (reason required)
+  - *Volunteers*: everyone approved, with availability, phone and a WhatsApp link
+  - *Rejected*
+- **How it works (rules.md BR-150):**
+  - Applying creates the Supabase login at once; the password is held only by Supabase Auth.
+  - Logging in says "waiting for a coordinator to approve" until an admin approves. Approving creates the volunteer
+    profile, so the person can log in and is suggested for incidents straight away.
+  - Rejecting deletes the login and the photo; the person may apply again.
+- **Lead-only files changed** (treated as approved by the request):
+  - `supabase/schema.sql`: new `volunteer_applications` table and index, with RLS on
+  - `shared/types.ts`: application and volunteer-list types
+  - `shared/constants.ts`: `MIN_PASSWORD_LENGTH = 8`
+  - `src/App.tsx`: 2 routes
+  - `src/data/index.ts`: 5 `Api` functions
+  - `server/index.ts`: mounts the new router
+- **Other files:**
+  - new: `server/routes/applications.ts`, `src/pages/VolunteerRegister.tsx`, `src/pages/admin/Volunteers.tsx`
+  - changed: `server/routes/admin.ts`, `server/routes/authRoutes.ts`, `src/data/realApi.ts`, `src/components/Layout.tsx`,
+    `src/pages/Home.tsx`, `src/pages/Login.tsx`, `src/i18n/{en,ta,hi}.ts`
+  - tests: `tests/integration/{api.test.ts,fakeSupabase.ts,testApp.ts}`
+  - docs: `docs/features.md` F26/S12/S13, `docs/rules.md` BR-150, `docs/architecture.md` §2/§5/§6.8/§8,
+    `docs/verification.md`
+- **Evidence (run 2026-09-30):**
+  - 12 new API tests; **97 tests pass**; type check and build pass
+  - 3 more deliberate breaks caught (M14–M16)
+  - both screens checked in headless Chrome against a stand-in API
+- **⚠️ Before using it on the real database:** run `supabase/schema.sql` again in the Supabase SQL Editor. It only
+  adds the new table; existing tables and data are untouched. Until then, sending an application fails (its login
+  is removed again) and the Volunteers page shows an error; existing logins keep working.
+- **Not built:** automatic ID checks; emails to applicants about the decision; translating the registration form
+  (English only, like the other staff screens).
+
+## Safety map radius (2026-09-30)
+
+Requested: "show reports only up to a certain radius" on the safety map.
+
+- **Behaviour (rules.md BR-85):**
+  - With the phone's location, the map and list show only hazards within **2, 5 or 10 km** (default 5 km,
+    remembered on the phone).
+  - A dashed circle marks the radius and the map zooms to fit it.
+  - The page says how many hazards are farther away.
+  - Without a location, everything is shown with a note asking to allow location.
+  - The "N active hazards within 2 km" banner is unchanged.
+- **Privacy:** the filtering happens on the phone, so its location is never sent to the server. The public API is
+  unchanged.
+- **Files:**
+  - `shared/constants.ts` (lead-only; `MAP_RADIUS_OPTIONS_M`, `MAP_DEFAULT_RADIUS_M`)
+  - `shared/publicView.ts` (`withinRadius`)
+  - `src/pages/PublicMap.tsx`, `src/components/SafetyMap.tsx`
+  - `src/i18n/{en,ta,hi}.ts` (6 new texts each)
+  - `tests/rules.test.ts`
+  - docs: features F19, rules BR-85 + constants, verification
+- **Evidence (2026-09-30):**
+  - 1 new rule test; **98 tests pass**; type check and build pass
+  - checked in headless Chrome with a simulated GPS position (desktop English, phone Tamil, location denied)
+- **Also found while fixing "the map doesn't load":** nothing was wrong in the code. Only a stand-alone Vite dev server
+  was running, with no API server behind it, so `/api/public/incidents` answered 502. Start the app with `npm run dev`,
+  or `npm run build && npm start`.
 
 ## Only you can do these
 
 - **Rotate the Supabase keys.**
+- **Run `supabase/schema.sql` again** so the `volunteer_applications` table exists.
 - **Tell me the hackathon track** (placeholder at the top of `docs/problem.md`).
 - **Check live updates through a real `npm run tunnel` link** on two phones (not tested through a live tunnel).
 - **Collect real user feedback** (plan + template: `docs/impact-and-deployment.md` §6–7).
@@ -126,7 +198,7 @@ After these: **83 tests pass** (28 rule + 55 API), **13 of 13 mutations caught**
 - `docs/problem.md` §2: how often emergency lines are overwhelmed, how long requests wait, how many are duplicates.
 - `docs/comparison.md` §5: other tools' triage features, where KoboToolbox's AI runs, and what Indian authorities
   currently use.
-- `docs/verification.md` §6: a run against a real Supabase project, iPhone/Safari recordings, and a live Cloudflare
-  tunnel against the reset guard.
+- `docs/verification.md` §6: a run against a real Supabase project (including volunteer registration with real
+  Supabase Auth), iPhone/Safari recordings, and a live Cloudflare tunnel against the reset guard.
 - `docs/scaling.md`: Supabase plan limits for the computed polling load; whether Cloudflare quick tunnels pass the
   live-signal streams through unbuffered.

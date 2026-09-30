@@ -378,6 +378,8 @@ Status overrides:
 - RESPONDING appends " Responders are on site or on the way."
 - RESOLVED replaces the text with "Resolved. Take care when moving through the area."
 
+**BR-85 Map radius:** on S05, when the device's location is known, only visible incidents within the chosen radius of it are shown (map, list and selection). Choices `MAP_RADIUS_OPTIONS_M`, default `MAP_DEFAULT_RADIUS_M`, remembered per device. The number of hidden (farther) incidents is shown. Filtering happens in the browser (`withinRadius()` in `shared/publicView.ts`), so the device's location is never sent to the server; the API response is unchanged. Without a location nothing is hidden and a note explains why. The BR-82 banner still counts within `NEARBY_RADIUS_M`.
+
 ## B8. Victim tracking
 
 **BR-90 Victim step** (`victimStep`, first match wins):
@@ -483,6 +485,17 @@ Availability: a volunteer may set AVAILABLE or OFFLINE only while they have no A
 - Sets `phone` and `phone_verified = true` on the report, logs, and recomputes the incident.
 - No SMS is sent. The "Demo code" hint is shown only in DEV builds or when DEV_MODE is on.
 
+## B11. Volunteer registration
+
+**BR-150 Volunteer applications (F26):**
+- Anyone may apply without logging in (`POST /api/volunteer-applications`). Required: name 2–80 characters; a valid email; a phone of PHONE_MIN_DIGITS–PHONE_MAX_DIGITS digits (optional `+`, spaces ignored); a password of at least MIN_PASSWORD_LENGTH characters; at least one skill from SKILLS. Optional: equipment from EQUIPMENT, vehicle from VEHICLES (default NONE), lat and lng together or neither, an area of at most 200 characters. An ID-proof photo is required: JPEG, at most MAX_PHOTO_BASE64 characters. Anything else → `VALIDATION`.
+- Applying creates the Supabase Auth login at once (email confirmed; the password is held only by Supabase Auth, never in our tables), stores the proof at `media/applications/<id>/proof.jpg` and inserts a `volunteer_applications` row with status PENDING. **No profile row is created yet.** If the email already has a login → `VALIDATION` "An account with this email already exists." If storing the proof or the row fails, the login and the proof are removed so the person can simply retry.
+- While the application is PENDING, logging in returns 401 "Your volunteer application is waiting for a coordinator to approve it."
+- Only ADMIN may list applications, see the proof (signed URL, SIGNED_URL_SECONDS) and review them.
+- **Approve** (PENDING only, else `INVALID_STATE`): insert a VOLUNTEER profile with the same id as the login, copying name, email, phone, skills, equipment, vehicle and location; availability AVAILABLE. Mark APPROVED with reviewer and time. The volunteer can log in and is suggested for incidents (B5) immediately. The proof stays in the private bucket as the record of what was checked.
+- **Reject** (PENDING only; a reason is required): delete the login and the proof photo, mark REJECTED with the reason, reviewer and time. The same email may apply again.
+- The volunteer list (`GET /api/admin/volunteers`) is staff-only because it includes phone numbers (AR-22, AR-23 still apply to public and chat responses).
+
 ---
 
 # PART C — CONSTANTS, CONVENTIONS, GLOSSARY
@@ -508,9 +521,12 @@ Availability: a volunteer may set AVAILABLE or OFFLINE only while they have no A
 | RELATED_MAX_DISTANCE_M / RELATED_MAX_HOURS | 2000 / 12 |
 | PUBLIC_RESOLVED_HOURS | 6 |
 | NEARBY_RADIUS_M | 2000 |
+| MAP_RADIUS_OPTIONS_M / MAP_DEFAULT_RADIUS_M (BR-85) | [2000, 5000, 10000] / 5000 |
 | RECENT_REPORT_MINUTES | 60 |
 | OFFLINE_SUBMIT_THRESHOLD_MIN | 2 (shows "sent while offline") |
 | SIGNED_URL_SECONDS | 3600 |
+| MIN_PASSWORD_LENGTH (volunteer registration, BR-150) | 8 |
+| PHONE_MIN_DIGITS / PHONE_MAX_DIGITS | 7 / 15 |
 | CONFIDENCE weights | BASE 35, EXTRA_REPORT 20, EXTRA_REPORT_MAX 40, PHOTO 15, RECENT 10, PHONE 5, CORROBORATED 20, MAX 99 |
 | PRIORITY weights | PEOPLE_5PLUS 20, PEOPLE_2TO4 12, PEOPLE_1_OR_UNKNOWN 6, TRAPPED 25, VULNERABLE 15, MEDICAL 20, DANGER 15, SEVERE_TYPE 10 |
 | PRIORITY thresholds | CRITICAL 70, HIGH 45, MEDIUM 20 |

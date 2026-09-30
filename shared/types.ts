@@ -281,7 +281,57 @@ export interface VolunteerAssignment {
   reporters: { reportId: string; label: string }[];
 }
 
+// ---------- Volunteer registration (F26) ----------
+export type ApplicationStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+export interface VolunteerApplicationInput {
+  name: string;
+  email: string;
+  phone: string;
+  password: string;
+  skills: Skill[];
+  equipment: Equipment[];
+  vehicle: Vehicle;
+  lat: number | null;
+  lng: number | null;
+  locationText: string | null;
+  /** JPEG photo of an ID proof, base64 without prefix (resized on the phone like report photos). */
+  proofBase64: string;
+}
+/** Admin view of an application. Never includes the password. */
+export interface VolunteerApplication {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  skills: Skill[];
+  equipment: Equipment[];
+  vehicle: Vehicle;
+  locationText: string | null;
+  hasLocation: boolean;
+  status: ApplicationStatus;
+  rejectReason: string | null;
+  proofUrl: string | null;
+  createdAt: string;
+  reviewedAt: string | null;
+}
+/** Admin list of approved volunteers (staff-only: includes phone). */
+export interface VolunteerListItem {
+  id: string;
+  name: string;
+  email: string;
+  phone: string | null;
+  skills: Skill[];
+  equipment: Equipment[];
+  vehicle: Vehicle;
+  availability: Availability;
+}
+
 // ---------- Server records (DB rows in camelCase; converted only in server/mappers.ts) ----------
+export interface ApplicationRecord {
+  id: string; userId: string; name: string; email: string; phone: string; skills: Skill[]; equipment: Equipment[];
+  vehicle: Vehicle; lat: number | null; lng: number | null; locationText: string | null; proofPath: string | null;
+  status: ApplicationStatus; rejectReason: string | null; reviewedBy: string | null; reviewedAt: string | null; createdAt: string;
+}
 export interface ProfileRecord {
   id: string; name: string; email: string; role: Role; phone: string | null;
   skills: Skill[]; equipment: Equipment[]; vehicle: Vehicle; availability: Availability;

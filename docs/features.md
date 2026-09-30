@@ -1,6 +1,6 @@
 # features.md — Hyperlocal HopeGrid Platform (Hackathon MVP v3)
 
-> **Purpose of this file:** WHAT to build: every feature (`F01`–`F25`), every screen (`S01`–`S11`), acceptance checks, and the demo scenario that proves the product works.
+> **Purpose of this file:** WHAT to build: every feature (`F01`–`F26`), every screen (`S01`–`S13`), acceptance checks, and the demo scenario that proves the product works.
 > **Structure, files, database and API:** see `architecture.md`. **Behaviour rules (`BR-*`) and agent rules (`AR-*`):** see `rules.md`.
 > A feature is done only when every acceptance check passes against the real backend.
 
@@ -35,8 +35,9 @@
 | F23 | Demo tools | MUST | Team | Layout.tsx dev buttons, `/api/dev/reset` | — |
 | F24 | Live dictation while speaking (online only) | COULD | Victim | hooks/useLiveDictation.ts | F01 |
 | F25 | Victim screens in Tamil and Hindi | SHOULD | Victim | src/i18n/ | F01, F02, F06, F19 |
+| F26 | Volunteer self-registration with ID proof | SHOULD | Volunteer, Admin | pages/VolunteerRegister.tsx, pages/admin/Volunteers.tsx, server/routes/applications.ts | F11, F14, F16 |
 
-**Out of scope (do not build):** victim accounts, volunteer self-registration, video upload, push notifications, real SMS, real calls or number masking, real emergency-service integration, offline admin/volunteer actions, multiple volunteers on one incident, undo merge, analytics, translating the staff (admin/volunteer) screens.
+**Out of scope (do not build):** victim accounts, automatic ID checking (a coordinator looks at the photo), editing an application after sending it, video upload, push notifications, real SMS, real calls or number masking, real emergency-service integration, offline admin/volunteer actions, multiple volunteers on one incident, undo merge, analytics, translating the staff (admin/volunteer) screens.
 
 ---
 
@@ -138,7 +139,7 @@
 
 ### F11 — Staff login
 **Goal:** admin and volunteers log in with seeded accounts.
-**Behaviour:** S06 email + password + two quick buttons "Demo: Admin", "Demo: Volunteer (Ravi)" that fill credentials (visible only in DEV mode). After login redirect: ADMIN → `/admin`, VOLUNTEER → `/volunteer`. Logout button in Layout. Token kept in sessionStorage.
+**Behaviour:** S06 email + password + two quick buttons "Demo: Admin", "Demo: Volunteer (Ravi)" that fill credentials (visible only in DEV mode). After login redirect: ADMIN → `/admin`, VOLUNTEER → `/volunteer`. A volunteer whose application (F26) is still waiting sees "waiting for a coordinator to approve". S06 links to S13. Logout button in Layout. Token kept in sessionStorage.
 **Acceptance:**
 - [ ] Volunteer cannot open `/admin` (redirected) and gets 403 from admin API.
 
@@ -216,6 +217,7 @@
 **Goal:** community sees hazards safely.
 **Behaviour:**
 1. S05 map centred on the user's location if available, else on the demo centre; markers colored per BR-83 with emoji icons by type.
+   With a location, only hazards within the chosen radius are shown (BR-85): chips "2 km · 5 km · 10 km" (default 5 km, remembered on the device), a dashed circle on the map (zoomed to fit), and "N more are farther than X km". Without a location, all hazards are shown with a note asking to allow location.
 2. Toggle Map / List. Automatic list mode when tiles fail to load or device is offline.
 3. Tap marker/list item → card: type label, area (or "Approximate location"), status label (ACTIVE "Active", RESPONDING "Help on the way", RESOLVED "Resolved"), priority, "Confidence: High/Medium/Low", "Verified" or "Unverified" tag, report count, "Updated X min ago", advice.
 4. Legend. Polls every `POLL_PUBLIC_MS`.
@@ -223,6 +225,7 @@
 **Acceptance:**
 - [ ] The public API response contains none of: report text, transcript, phone, photo/audio URL, names, `location_text`, exact coordinates (only 3 decimals).
 - [ ] Resolving an incident turns its marker green within one poll interval.
+- [ ] With hazards 1, 4 and 8 km away: 2 km shows 1, 5 km (default) shows 2 with "1 more is farther than 5 km", 10 km shows 3; the choice survives a reload; with location denied all 3 show with the note.
 
 ### F20 — Resources
 **Behaviour:** S11 table (name, category, available quantity, unit, location) + "Add resource" modal + edit quantity inline. On incident page: "Allocate" modal (resource select showing available, quantity) → BR-130. Allocations list on incident page.
@@ -252,6 +255,15 @@
 - [ ] A Hindi voice note produces a Hindi transcript plus an English line, and a structured incident.
 - [ ] Offline preview on "Report sent" works for a typed Hindi report.
 
+### F26 — Volunteer self-registration with ID proof
+**Goal:** people who want to help can sign up themselves; a coordinator checks who they are before they get assignments.
+**Behaviour:** S13 public form (English): full name, phone, email (the login), password, skills (chips, at least one), equipment (chips, optional), vehicle, optional GPS + area, a photo of an ID proof (camera or file, compressed on the phone like report photos), and a consent checkbox. The form lists what is still missing; "Send application" shows "Application received". Links to S13 on S01 (in all three languages) and S06. S12 (admin nav "Volunteers") has tabs: *Waiting for review (n)* — one card per application with details, skills, equipment, vehicle, the ID-proof photo, Approve, and Reject (asks for a reason); *Volunteers* — every approved volunteer with skills, equipment, vehicle, availability, phone and a WhatsApp link; *Rejected* — reason and date. Rules: BR-150.
+**Acceptance:**
+- [ ] Register → logging in says "waiting for a coordinator to approve" → admin approves → the same email/password logs in to `/volunteer`, and the person appears in S12 *Volunteers* and in incident suggestions (F14) with the skills and equipment they entered.
+- [ ] Reject with a reason → login no longer works, the ID photo is deleted, and the same email can apply again.
+- [ ] The application list never contains the password; a volunteer or anonymous user gets 403/401 from the admin endpoints.
+- [ ] Missing skill, bad phone, short password, missing or non-JPEG proof are refused with a clear message.
+
 ---
 
 ## 3. Screens
@@ -269,10 +281,12 @@
 | S09 | `/volunteer` | Volunteer home | Volunteer | F15, F16 |
 | S10 | `/volunteer/assignments/:id` | Assignment | Volunteer | F15, F17 |
 | S11 | `/admin/resources` | Resources | Admin | F20 |
+| S12 | `/admin/volunteers` | Volunteers (applications + list) | Admin | F26 |
+| S13 | `/volunteer/register` | Volunteer registration | Anyone | F26 |
 
 **S01 Home layout:** app name; huge red button "🚨 REPORT EMERGENCY" + "No account needed · works offline"; buttons "Track my report", "Safety map"; unsent-report notice; emergency banner; small "Staff login" link at the bottom.
 
-**Navigation:** Home → Report → Report sent → (Track | Home). Home → Track. Home → Map. Login → Dashboard → Incident page (→ other incidents via duplicate/related links) ; Dashboard ↔ Resources. Login → Volunteer home → Assignment → back.
+**Navigation:** Home → Report → Report sent → (Track | Home). Home → Track. Home → Map. Login → Dashboard → Incident page (→ other incidents via duplicate/related links) ; Dashboard ↔ Resources ↔ Volunteers. Login → Volunteer home → Assignment → back. Home or Login → Volunteer registration → Home.
 
 **Design rules:** victim, volunteer and map screens are mobile-first (360 px wide); admin screens desktop-first (≥ 1024 px) but usable on tablet. Large touch targets (≥ 44 px) on victim screens. Every data screen has loading, empty and error states.
 

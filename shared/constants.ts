@@ -18,6 +18,7 @@ export const MIN_REPORT_TEXT = 5;
 export const MAX_PEOPLE = 500;
 export const PHONE_MIN_DIGITS = 7;
 export const PHONE_MAX_DIGITS = 15;
+export const MIN_PASSWORD_LENGTH = 8;       // volunteer registration (F26)
 
 export const MAX_AUDIO_SECONDS = 60;
 export const MAX_PHOTO_BASE64 = 3_000_000;
@@ -50,6 +51,9 @@ export const RELATED_MAX_HOURS = 12;
 
 export const PUBLIC_RESOLVED_HOURS = 6;
 export const NEARBY_RADIUS_M = 2000;
+/** BR-85: distances a person can choose on the safety map; hazards farther away are hidden. */
+export const MAP_RADIUS_OPTIONS_M = [2000, 5000, 10000] as const;
+export const MAP_DEFAULT_RADIUS_M = 5000;
 export const RECENT_REPORT_MINUTES = 60;
 export const OFFLINE_SUBMIT_THRESHOLD_MIN = 2;
 export const SIGNED_URL_SECONDS = 3600;

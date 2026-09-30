@@ -17,6 +17,8 @@ import IncidentPage from './pages/admin/IncidentPage';
 import Resources from './pages/admin/Resources';
 import AssignmentPage from './pages/volunteer/AssignmentPage';
 import VolunteerHome from './pages/volunteer/VolunteerHome';
+import VolunteerRegister from './pages/VolunteerRegister';
+import Volunteers from './pages/admin/Volunteers';
 
 /** Unauthenticated → /login. Wrong role → that user's home. */
 function RequireRole({ role, children }: { role: Role; children: ReactNode }) {
@@ -44,6 +46,8 @@ export default function App() {
             <Route path="/admin" element={<RequireRole role="ADMIN"><Dashboard /></RequireRole>} />
             <Route path="/admin/incidents/:id" element={<RequireRole role="ADMIN"><IncidentPage /></RequireRole>} />
             <Route path="/admin/resources" element={<RequireRole role="ADMIN"><Resources /></RequireRole>} />
+            <Route path="/volunteer/register" element={<VolunteerRegister />} />
+            <Route path="/admin/volunteers" element={<RequireRole role="ADMIN"><Volunteers /></RequireRole>} />
             <Route path="/volunteer" element={<RequireRole role="VOLUNTEER"><VolunteerHome /></RequireRole>} />
             <Route path="/volunteer/assignments/:id" element={<RequireRole role="VOLUNTEER"><AssignmentPage /></RequireRole>} />
             <Route path="*" element={<NotFound />} />

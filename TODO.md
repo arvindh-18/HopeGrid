@@ -8,7 +8,7 @@ Background for every item is in `PROJECT.md` (kept in ~/Downloads) and in `CHANG
 ## 🔴 Do first (before committing or demoing)
 
 ### Git
-- [ ] **Review and commit the score-raising pass** (see `CHANGES.md`): security fixes, 48 API tests, the AI
+- [ ] **Review and commit the score-raising pass** (see `CHANGES.md`): security fixes, the API tests (98 tests in total now), the AI
       evaluation, the processing queue, the clean-up script and the new docs. Nothing has been committed.
 - [ ] **Rotate both Supabase keys now** (Project Settings → API Keys). The real keys are in the public git history
       (commits `962d3d2`, `6ccb65a`, `0197709`) even though `.env.example` now has placeholders. Then update `.env`.
@@ -18,6 +18,12 @@ Background for every item is in `PROJECT.md` (kept in ~/Downloads) and in `CHANG
 - [ ] **Decide on the old branches.** Keep or delete `test` and `test-push`, locally and on GitHub. All their work is now in `main`.
 
 ### Database (Supabase)
+- [ ] **Run `supabase/schema.sql` again in the Supabase SQL Editor** (new: volunteer registration). It only creates the
+      `volunteer_applications` table; nothing existing is changed or deleted. Until then `/volunteer/register` can't
+      save applications and **Volunteers** in the admin menu shows an error.
+- [ ] **Try volunteer registration once on the real database:** register a test volunteer at `/volunteer/register` →
+      log in (should say "waiting for approval") → approve under **Volunteers** → log in again (volunteer home). Then
+      register a second one and reject it; check the user disappears under Supabase → Authentication → Users.
 - [ ] **Finish the manual incident cleanup.** Leftovers: `PW7NX`, `RB4KT`, `FR2QH` (seed incidents whose reports were
       deleted) and `RPUXR` (orphan). Delete child rows first: messages → assignments → allocations → incident_logs →
       reports → incidents. Otherwise Supabase refuses with a foreign-key error.
@@ -57,7 +63,8 @@ Background for every item is in `PROJECT.md` (kept in ~/Downloads) and in `CHANG
 
 ### WhatsApp button
 - [ ] Put your teammates' **real** phone numbers on the volunteer profiles in Supabase (Table Editor → `profiles` → `phone`,
-      e.g. `+919840012345`). Seeded volunteers have none, so the button says "No phone number".
+      e.g. `+919840012345`). Seeded volunteers have none, so the button says "No phone number". Or let teammates
+      register at `/volunteer/register` and approve them: registered volunteers always have a phone number.
 - [ ] Try it once: assign a volunteer → **Send on WhatsApp** → WhatsApp opens with the message → Send.
 
 ### Demo run-through

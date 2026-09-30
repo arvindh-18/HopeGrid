@@ -29,6 +29,7 @@ const NAV: Record<Exclude<Variant, 'public'>, { to: string; label: string; end?:
   admin: [
     { to: '/admin', label: 'Incidents', end: true },
     { to: '/admin/resources', label: 'Resources' },
+    { to: '/admin/volunteers', label: 'Volunteers' },
     { to: '/map', label: 'Public map' },
   ],
   volunteer: [

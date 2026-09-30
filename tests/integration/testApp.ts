@@ -5,6 +5,7 @@ import express, { type ErrorRequestHandler } from 'express';
 import { request as httpRequest } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { adminRouter } from '../../server/routes/admin';
+import { applicationsRouter } from '../../server/routes/applications';
 import { authRouter } from '../../server/routes/authRoutes';
 import { devRouter } from '../../server/routes/dev';
 import { messagesRouter } from '../../server/routes/messages';
@@ -54,6 +55,7 @@ export async function startTestServer({ devMode = false } = {}): Promise<TestSer
   app.use('/api', messagesRouter);
   app.use('/api', publicRouter);
   app.use('/api', authRouter);
+  app.use('/api', applicationsRouter);
   app.use('/api/admin', adminRouter);
   app.use('/api/volunteer', volunteerRouter);
   if (devMode) app.use('/api', devRouter);

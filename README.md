@@ -12,9 +12,9 @@ Evidence and context: [problem](docs/problem.md) · [comparison with other tools
 
 | Part | State |
 |---|---|
-| Frontend (`src/`) | All screens S01–S11, connected to the real API through `src/data/realApi.ts` |
-| Shared rules (`shared/`) | Implemented and unit-tested (28 tests) |
-| API + pipeline | 55 integration tests with Supabase, the LLM and Whisper stubbed (`tests/integration/`) |
+| Frontend (`src/`) | All screens S01–S13, connected to the real API through `src/data/realApi.ts` |
+| Shared rules (`shared/`) | Implemented and unit-tested (29 tests) |
+| API + pipeline | 67 integration tests with Supabase, the LLM and Whisper stubbed (`tests/integration/`) |
 | Backend (`server/`, `supabase/`) | All API routes in architecture.md §8, report pipeline (Whisper → local LLM → keyword fallback, all running inside the server), seed + demo reset |
 
 `UI_SKELETON_STATUS.md` is a historical note from the UI phase and is out of date.
@@ -37,7 +37,7 @@ First-time setup:
 
 1. `npm install`: installs the code only (small, no models).
    - **Server laptop only:** `npm run setup-ai` downloads the AI and speech models into `models/` (about 2.5 GB, once). Without them the app still works: reports are structured by the keyword fallback and voice notes are left for staff to listen to.
-2. Run `supabase/schema.sql` once in the Supabase SQL editor, and fill in `.env` (see `.env.example`).
+2. Run `supabase/schema.sql` in the Supabase SQL editor, and fill in `.env` (see `.env.example`). It is safe to run again (`create … if not exists`); run it again after pulling changes that add tables (e.g. `volunteer_applications` for volunteer registration).
 3. `npm run seed` creates the staff accounts and demo data.
 4. In Supabase Auth settings, set JWT expiry to 86400 s so staff sessions last the whole demo.
 
@@ -55,6 +55,11 @@ Live updates: coordinator, volunteer and tracking screens get a live "something 
 Events) and refresh at once. While it is connected they poll only every 30 s; without it they poll as before.
 
 Seeded staff accounts (architecture.md §12, created by the server seed script): `admin@demo.app`, `ravi@demo.app`, password `Demo@123`.
+
+Volunteer registration: anyone can apply at `/volunteer/register` (linked from Home and Login) with their details, skills,
+equipment, vehicle and a photo of an ID proof. A coordinator reviews it under **Volunteers** in the admin menu;
+approving makes them a volunteer who can log in and be assigned, rejecting (with a reason) removes their login and
+deletes the photo.
 
 ## Structure
 
@@ -81,8 +86,9 @@ Pages only call `src/data/index.ts` (`api`), which is backed by `src/data/realAp
 
 | | What |
 |---|---|
-| **Real and tested** | Offline report outbox; report API with idempotent resend; local speech-to-text (Whisper) with English translation; local AI structuring (Qwen 2.5 3B) with keyword fallback, and the keyword type used when the rules find one (BR-11a); confidence and priority with reasons; duplicate flags (never auto-merged); volunteer matching; assignment workflow; private chat; public map limited to coordinator-verified incidents; Tamil/Hindi victim screens; retrying processing queue; live change signals (SSE) with polling fallback; retention clean-up script. See `docs/verification.md`. |
+| **Real and tested** | Offline report outbox; report API with idempotent resend; local speech-to-text (Whisper) with English translation; local AI structuring (Qwen 2.5 3B) with keyword fallback, and the keyword type used when the rules find one (BR-11a); confidence and priority with reasons; duplicate flags (never auto-merged); volunteer matching; assignment workflow; private chat; public map limited to coordinator-verified incidents; Tamil/Hindi victim screens; retrying processing queue; live change signals (SSE) with polling fallback; retention clean-up script; volunteer self-registration with coordinator review of an ID-proof photo. See `docs/verification.md`. |
 | **Simulated** | Phone verification: no SMS is sent, the code is always `123456`. Escalation to emergency services: only a log line, no external call. Seeded demo staff and incidents. |
 | **Measured but modest** | On synthetic reports the incident type is right 70% of the time (both sets); all fields right for only about a quarter of reports; Tamil is weak. See `docs/evaluation.md`. |
+| **Manual by design** | Volunteer ID check: a coordinator looks at the photo; nothing is checked automatically (no Aadhaar/DigiLocker lookup). |
 | **Simulated → manual** | WhatsApp alert to a volunteer: a "Send on WhatsApp" button prepares the message; the coordinator presses Send (automatic sending via the WhatsApp Business API is roadmap). |
-| **Not built (roadmap)** | SMS channel for feature phones; automatic WhatsApp notifications; rate limiting on the public endpoints; more than one server (live signals are in-process); a native-speaker review of the translations; testing with real users; a licence file. |
+| **Not built (roadmap)** | SMS channel for feature phones; automatic ID verification; email notice to applicants when they are approved or rejected; automatic WhatsApp notifications; rate limiting on the public endpoints; more than one server (live signals are in-process); a native-speaker review of the translations; testing with real users; a licence file. |

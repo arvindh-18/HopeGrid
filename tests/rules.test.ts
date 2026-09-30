@@ -3,7 +3,7 @@ import { chooseType, keywordExtractor } from '../shared/keywordExtractor';
 import { computeConfidence, computeEscalation, computePriority, confidenceBand } from '../shared/scoring';
 import { compatibleTypes, findDuplicate, findRelated, mergeFields, type LinkIncident, type MergeableIncident } from '../shared/linking';
 import { rankVolunteers, type MatchVolunteer } from '../shared/volunteerMatch';
-import { isPublic, markerColor, toPublicIncident } from '../shared/publicView';
+import { isPublic, markerColor, toPublicIncident, withinRadius } from '../shared/publicView';
 import { victimStep } from '../shared/trackingStatus';
 import { DEMO_CENTER } from '../shared/constants';
 
@@ -204,6 +204,20 @@ describe('BR-80 public view', () => {
     expect(markerColor('NEW', 'CRITICAL', 'FLOOD')).toBe('RED');
     expect(markerColor('NEW', 'LOW', 'ROAD_BLOCKED')).toBe('YELLOW');
     expect(markerColor('NEW', 'HIGH', 'FIRE')).toBe('ORANGE');
+  });
+});
+
+describe('BR-85 map radius', () => {
+  const kmNorth = (code: string, km: number) => toPublicIncident({
+    code, type: 'FLOOD', status: 'VERIFIED', lat: DEMO_CENTER.lat + km / 111.2, lng: DEMO_CENTER.lng, publicArea: null,
+    verifiedAt: minsAgo(5), resolvedAt: null, confidence: 65, effectivePriority: 'HIGH', reportCount: 1, updatedAt: minsAgo(1),
+  });
+  const list = [kmNorth('ONE', 1), kmNorth('FOUR', 4), kmNorth('EIGHT', 8)];
+  const within = (m: number) => withinRadius(list, DEMO_CENTER.lat, DEMO_CENTER.lng, m);
+  it('shows only the hazards within the chosen radius and counts the ones farther away', () => {
+    expect(within(2000)).toEqual({ inside: [list[0]], fartherCount: 2 });
+    expect(within(5000).inside.map((p) => p.code)).toEqual(['ONE', 'FOUR']);
+    expect(within(10000)).toEqual({ inside: list, fartherCount: 0 });
   });
 });
 

@@ -34,8 +34,8 @@ plus a phone hotspot), and the public HTTPS link (`npm run tunnel`) printed as a
 | Role | Tasks | Training (estimate, not measured) |
 |---|---|---|
 | Server operator | Start and stop the server, keep power and internet up, run backups, install updates | Half a day with the Run Guide |
-| Coordinator | Verify, merge, assign, resolve; watch the escalation hints; use the resources page | 1–2 hours of practice with the demo data |
-| Volunteer | Accept, update status, chat | 15 minutes on the phone |
+| Coordinator | Verify, merge, assign, resolve; watch the escalation hints; use the resources page; approve or reject volunteer sign-ups after checking the ID photo | 1–2 hours of practice with the demo data |
+| Volunteer | Sign up at `/volunteer/register` (details, skills, equipment, ID photo); accept, update status, chat | 15 minutes on the phone |
 | Residents | Scan the QR code, add the app to the home screen, send a test report | A one-page leaflet in Tamil/Hindi/English **[TO FILL: draft leaflet]** |
 
 ## 4. Adoption barriers

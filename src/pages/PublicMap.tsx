@@ -1,7 +1,8 @@
-// S05 Safety map — anonymised hazards with advice; map or list (features.md F19, F20).
+// S05 Safety map — anonymised hazards with advice; map or list (features.md F19, F20). Only hazards within the chosen
+// radius of the phone are shown (BR-85); the filtering happens on the phone, so its location is never sent anywhere.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { DEMO_CENTER, POLL_PUBLIC_MS } from '../../shared/constants';
-import { nearbyHazards } from '../../shared/publicView';
+import { DEMO_CENTER, MAP_DEFAULT_RADIUS_M, MAP_RADIUS_OPTIONS_M, POLL_PUBLIC_MS } from '../../shared/constants';
+import { nearbyHazards, withinRadius } from '../../shared/publicView';
 import type { PublicIncident } from '../../shared/types';
 import { Tag } from '../components/Badges';
 import { IconAlert, IconClose, IconList, IconMap } from '../components/Icons';
@@ -17,6 +18,15 @@ import { useAuth } from '../hooks/useAuth';
 import { useOnline } from '../offline/useOnline';
 
 const LEGEND: PublicIncident['color'][] = ['RED', 'ORANGE', 'YELLOW', 'GREEN'];
+const RADIUS_KEY = 'hopegrid.mapRadius';
+
+function savedRadius(): number {
+  try {
+    const v = Number(localStorage.getItem(RADIUS_KEY));
+    if ((MAP_RADIUS_OPTIONS_M as readonly number[]).includes(v)) return v;
+  } catch { /* storage blocked: use the default */ }
+  return MAP_DEFAULT_RADIUS_M;
+}
 
 export default function PublicMap() {
   const { user } = useAuth();
@@ -25,13 +35,21 @@ export default function PublicMap() {
   const { t } = i;
   const feed = usePoll(() => api.getPublicIncidents(), POLL_PUBLIC_MS);
   const [me, setMe] = useState<{ lat: number; lng: number } | null>(null);
+  const [locationOff, setLocationOff] = useState(false);
+  const [radius, setRadiusState] = useState(savedRadius);
   const [view, setView] = useState<'map' | 'list'>('map');
   const [tilesFailed, setTilesFailed] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
 
   useEffect(() => {
-    getPosition().then((p) => setMe({ lat: p.lat, lng: p.lng })).catch(() => setMe(null));
+    getPosition().then((p) => setMe({ lat: p.lat, lng: p.lng })).catch(() => { setMe(null); setLocationOff(true); });
   }, []);
+
+  function setRadius(m: number) {
+    setRadiusState(m);
+    try { localStorage.setItem(RADIUS_KEY, String(m)); } catch { /* not remembered, still applies */ }
+  }
+  const km = (m: number) => t('map.km', { n: m / 1000 });
 
   const mapUnavailable = tilesFailed || !online;
   const effectiveView = mapUnavailable ? 'list' : view;
@@ -42,8 +60,13 @@ export default function PublicMap() {
     if (!me) return list;
     return [...list].sort((a, b) => distanceMeters(me.lat, me.lng, a.lat, a.lng) - distanceMeters(me.lat, me.lng, b.lat, b.lng));
   }, [feed.data, me]);
+  // Without a location every hazard is shown (with a note); with one, only those within the chosen radius.
+  const { inside: shown, fartherCount } = useMemo(
+    () => (me ? withinRadius(incidents, me.lat, me.lng, radius) : { inside: incidents, fartherCount: 0 }),
+    [incidents, me, radius],
+  );
   const nearby = me ? nearbyHazards(incidents, me.lat, me.lng) : [];
-  const chosen = incidents.find((i) => i.code === selected) ?? null;
+  const chosen = shown.find((i) => i.code === selected) ?? null;
 
   return (
     <Layout variant={user?.role === 'ADMIN' ? 'admin' : user?.role === 'VOLUNTEER' ? 'volunteer' : 'public'} width="wide">
@@ -70,6 +93,18 @@ export default function PublicMap() {
             <span className="flex items-center gap-2 font-medium"><IconAlert size={18} /> {nearby.length === 1 ? t('map.nearbyOne') : t('map.nearbyMany', { n: nearby.length })}</span>
           </Notice>
         )}
+        {me && (
+          <div className="flex flex-wrap items-center gap-2" role="group" aria-label={t('map.radius')}>
+            <span className="t-body-sm text-muted">{t('map.radius')}</span>
+            {MAP_RADIUS_OPTIONS_M.map((m) => (
+              <button key={m} type="button" className="chip" aria-pressed={radius === m} onClick={() => setRadius(m)}>{km(m)}</button>
+            ))}
+            {fartherCount > 0 && (
+              <span className="t-caption">{fartherCount === 1 ? t('map.fartherOne', { d: km(radius) }) : t('map.fartherMany', { n: fartherCount, d: km(radius) })}</span>
+            )}
+          </div>
+        )}
+        {locationOff && <Notice>{t('map.locationOff')}</Notice>}
         {mapUnavailable && <Notice tone="warning">{online ? t('map.unavailableTiles') : t('map.unavailableOffline')}</Notice>}
 
         {feed.loading ? (
@@ -80,7 +115,7 @@ export default function PublicMap() {
           <div className="grid gap-4 lg:grid-cols-[1fr_380px]">
             {effectiveView === 'map' && (
               <div className="relative h-[62vh] min-h-[380px] overflow-hidden rounded-[16px] bg-strong">
-                <SafetyMap incidents={incidents} center={me ?? DEMO_CENTER} user={me} selected={selected} onSelect={setSelected} onTileError={onTileError} />
+                <SafetyMap incidents={shown} center={me ?? DEMO_CENTER} user={me} radiusM={me ? radius : null} selected={selected} onSelect={setSelected} onTileError={onTileError} />
                 <div className="absolute bottom-3 left-3 z-[500] flex flex-wrap gap-x-3 gap-y-1 rounded-[12px] bg-white/95 px-3 py-2 text-[13px] shadow" aria-label={t('map.legend')}>
                   {LEGEND.map((c) => (
                     <span key={c} className="flex items-center gap-1.5"><span className={`h-3 w-3 rounded-full pin-${c}`} />{i.legend(c)}</span>
@@ -96,11 +131,11 @@ export default function PublicMap() {
 
             <aside className={`flex flex-col gap-3 ${effectiveView === 'map' ? 'hidden lg:flex' : 'lg:col-span-2'}`} aria-label={t('map.hazardsList')}>
               {chosen && effectiveView === 'map' && <HazardCard p={chosen} me={me} onClose={() => setSelected(null)} />}
-              {incidents.length === 0 ? (
-                <EmptyState title={t('map.emptyTitle')} body={t('map.emptyBody')} />
+              {shown.length === 0 ? (
+                <EmptyState title={me ? t('map.emptyWithin', { d: km(radius) }) : t('map.emptyTitle')} body={t('map.emptyBody')} />
               ) : (
                 <ul className={`grid gap-2 ${effectiveView === 'list' ? 'sm:grid-cols-2 xl:grid-cols-3' : 'max-h-[56vh] overflow-y-auto'}`}>
-                  {incidents.map((p) => (
+                  {shown.map((p) => (
                     <li key={p.code}>
                       <button type="button" onClick={() => setSelected(p.code)}
                         className={`card flex w-full items-start gap-3 p-4 text-left transition-colors hover:bg-[#fafafa] ${selected === p.code ? 'ring-2 ring-ink' : ''}`}>

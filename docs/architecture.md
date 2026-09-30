@@ -23,7 +23,7 @@ Victims report emergencies from a phone (text, voice, photo, GPS) without loggin
 | Admin | Supabase Auth (email + password), role `ADMIN` | `/admin/*` |
 | Volunteer | Supabase Auth (email + password), role `VOLUNTEER` | `/volunteer/*` |
 
-There is no self-registration. All staff accounts are created by the seed script.
+Admin accounts are created by the seed script or by hand (Supabase Auth user + `profiles` row). Volunteers can also register themselves at `/volunteer/register` (F26): the login is created at once but only works after an admin approves the application, which creates the `profiles` row (BR-150). There are no victim accounts.
 
 ---
 
@@ -133,6 +133,7 @@ hopegrid/
 │   │   ├── victim.ts
 │   │   ├── public.ts
 │   │   ├── authRoutes.ts
+│   │   ├── applications.ts       (F26 volunteer registration, public)
 │   │   ├── admin.ts
 │   │   ├── volunteer.ts
 │   │   ├── messages.ts
@@ -177,11 +178,13 @@ hopegrid/
 │       ├── Track.tsx
 │       ├── PublicMap.tsx
 │       ├── Login.tsx
+│       ├── VolunteerRegister.tsx (F26)
 │       ├── NotFound.tsx
 │       ├── admin/
 │       │   ├── Dashboard.tsx
 │       │   ├── IncidentPage.tsx
-│       │   └── Resources.tsx
+│       │   ├── Resources.tsx
+│       │   └── Volunteers.tsx    (F26 applications + volunteer list)
 │       └── volunteer/
 │           ├── VolunteerHome.tsx
 │           └── AssignmentPage.tsx
@@ -235,8 +238,9 @@ hopegrid/
 | routes/victim.ts | `/api/reports`, `/api/track`, `/api/track/verify-phone`. |
 | routes/public.ts | `/api/public/incidents`. |
 | events.ts | In-process change signals: `emitChange({incidentId, reportId?, volunteerId?})` (called on every incident update, log, report link/finish, chat message and assignment), merged per `STREAM_COALESCE_MS`; `openStream(res, pick)` writes a Server-Sent Events stream with a ping every `STREAM_PING_MS`. |
-| routes/authRoutes.ts | `/api/auth/login`, `/api/auth/me`. |
-| routes/admin.ts | All `/api/admin/*` routes. |
+| routes/authRoutes.ts | `/api/auth/login`, `/api/auth/me`. Login without a profile row → 401; the message says "waiting for approval" when a PENDING volunteer application exists (BR-150). |
+| routes/applications.ts | `POST /api/volunteer-applications` (public): validates, creates the Supabase Auth login, stores the ID proof, inserts the application; undoes the login and proof if a later step fails (BR-150). |
+| routes/admin.ts | All `/api/admin/*` routes, including application review (approve → profile row; reject → login and proof deleted) and the volunteer list. |
 | routes/volunteer.ts | `/api/volunteer/*` except chat. |
 | routes/messages.ts | Victim chat (`/api/track/chat*`) and volunteer chat (`/api/volunteer/assignments/:id/chat`). |
 | routes/dev.ts | `/api/dev/reset` — only mounted when `DEV_MODE=true`, and only answers requests made on the server laptop itself (loopback, no forwarding headers, `Host: localhost`). |
@@ -286,6 +290,8 @@ hopegrid/
 | `/admin` | admin/Dashboard | ADMIN |
 | `/admin/incidents/:id` | admin/IncidentPage | ADMIN |
 | `/admin/resources` | admin/Resources | ADMIN |
+| `/admin/volunteers` | admin/Volunteers | ADMIN |
+| `/volunteer/register` | VolunteerRegister | Public (declared before `/volunteer`) |
 | `/volunteer` | volunteer/VolunteerHome | VOLUNTEER |
 | `/volunteer/assignments/:id` | volunteer/AssignmentPage | VOLUNTEER |
 | `*` | NotFound | — |
@@ -298,7 +304,7 @@ Unauthenticated access to a protected route → redirect to `/login`. Wrong role
 
 Conventions: `id uuid primary key default gen_random_uuid()` unless stated; `created_at timestamptz default now()`; text enums stored as `text` (values from `shared/types.ts`); arrays as `text[]`; reason lists as `jsonb`. RLS enabled on every table, **no policies**.
 
-### 6.1 `profiles` (staff; one row per Supabase auth user)
+### 6.1 `profiles` (staff; one row per Supabase auth user that may log in)
 
 | Column | Type | Null | Notes |
 |---|---|---|---|
@@ -411,6 +417,28 @@ Bucket `media` (private). Paths:
 - `reports/{reportId}/photo.jpg`
 - `reports/{reportId}/audio.{webm|mp4|ogg}`
 - `messages/{messageId}.{webm|mp4|ogg}`
+- `applications/{applicationId}/proof.jpg` (volunteer ID proof, F26; admins only; deleted on rejection)
+
+### 6.8 `volunteer_applications` (F26, BR-150)
+
+| Column | Type | Null | Notes |
+|---|---|---|---|
+| id | uuid PK | no | |
+| user_id | uuid | no | the Supabase Auth user created on apply; becomes `profiles.id` on approval |
+| name, email, phone | text | no | |
+| skills | text[] | no | `Skill[]`, at least one |
+| equipment | text[] | no | `Equipment[]`, may be empty |
+| vehicle | text | no | `Vehicle`, default `NONE` |
+| lat, lng | double precision | yes | optional base location |
+| location_text | text | yes | area typed by the applicant |
+| proof_path | text | yes | storage path of the ID photo; null after rejection |
+| status | text | no | `PENDING` \| `APPROVED` \| `REJECTED`, default `PENDING` (index) |
+| reject_reason | text | yes | |
+| reviewed_by | uuid | yes | admin profile id |
+| reviewed_at | timestamptz | yes | |
+| created_at | timestamptz | no | |
+
+No password column: Supabase Auth holds it.
 
 ---
 
@@ -507,11 +535,17 @@ PublicIncident = { code, type, color: MarkerColor, area: string|null,
   reportCount: number, status: PublicStatus, advice: string, updatedAt }
 ```
 
+**Volunteer registration (no login)**
+
+| Method | Path | Request | Response |
+|---|---|---|---|
+| POST | /volunteer-applications | `VolunteerApplicationInput` = `{name, email, phone, password, skills, equipment, vehicle, lat, lng, locationText, proofBase64}` | 201 `{ok:true}`; 400 VALIDATION (incl. "An account with this email already exists.") |
+
 **Auth**
 
 | Method | Path | Request | Response |
 |---|---|---|---|
-| POST | /auth/login | `{email, password}` | `{token, user: {id, name, role}}`; 401 |
+| POST | /auth/login | `{email, password}` | `{token, user: {id, name, role}}`; 401 (a PENDING volunteer applicant gets "waiting for a coordinator to approve") |
 | GET | /auth/me | — | `{user}` |
 
 **Admin (role ADMIN)**
@@ -535,6 +569,10 @@ PublicIncident = { code, type, color: MarkerColor, area: string|null,
 | GET | /admin/resources | — | `Resource[]` |
 | POST | /admin/resources | `{name, category, quantity, unit, locationText}` | `Resource` |
 | PATCH | /admin/resources/:id | partial of the above | `Resource` |
+| GET | /admin/applications?status=PENDING\|APPROVED\|REJECTED | — | `VolunteerApplication[]` (newest first; never contains the password) |
+| POST | /admin/applications/:id/approve | — | `{ok:true}`; 409 INVALID_STATE if already reviewed |
+| POST | /admin/applications/:id/reject | `{reason}` | `{ok:true}`; 400 without a reason; 409 INVALID_STATE if already reviewed |
+| GET | /admin/volunteers | — | `VolunteerListItem[]` (by name; staff-only, includes phone) |
 
 ```text
 IncidentListItem = { id, code, type, status, priority: PriorityLevel (effective),
@@ -568,6 +606,10 @@ ChatMessage = { id, sender: VICTIM|VOLUNTEER, text|null, audioUrl|null,
   lat|null, lng|null, createdAt }
 
 Resource = { id, name, category, quantity, unit, locationText }
+
+VolunteerApplication = { id, name, email, phone, skills, equipment, vehicle,
+  locationText, hasLocation, status, rejectReason, proofUrl|null (signed), createdAt, reviewedAt }
+VolunteerListItem = { id, name, email, phone|null, skills, equipment, vehicle, availability }
 ```
 
 **Volunteer (role VOLUNTEER)**
@@ -611,6 +653,8 @@ mergeIncident(id, intoId)    dismissDuplicate(id)
 assignVolunteer(id, volunteerId)  cancelAssignment(assignmentId)
 allocateResource(id, resourceId, qty)
 listResources()  createResource(r)  updateResource(id, patch)
+applyAsVolunteer(input)      listApplications(status)     approveApplication(id)
+rejectApplication(id, reason)  listVolunteers()
 getMyProfile()  updateMyProfile(patch)  listMyAssignments()
 updateAssignmentStatus(id, status, reason?)
 getAssignmentChat(id)  sendVolunteerMessage(id, reportId, msg)

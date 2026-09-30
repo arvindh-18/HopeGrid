@@ -9,6 +9,7 @@ import { ApiError, type ErrorCode } from '../shared/types';
 import { loadAiModel } from './ai';
 import { processPendingReports } from './pipeline';
 import { adminRouter } from './routes/admin';
+import { applicationsRouter } from './routes/applications';
 import { authRouter } from './routes/authRoutes';
 import { devRouter } from './routes/dev';
 import { messagesRouter } from './routes/messages';
@@ -37,6 +38,7 @@ app.use('/api', victimRouter);
 app.use('/api', messagesRouter); // victim chat + volunteer chat, before the volunteer router
 app.use('/api', publicRouter);
 app.use('/api', authRouter);
+app.use('/api', applicationsRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/volunteer', volunteerRouter);
 if (process.env.DEV_MODE === 'true') app.use('/api', devRouter);

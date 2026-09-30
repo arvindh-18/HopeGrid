@@ -2,7 +2,7 @@
 import { Router } from 'express';
 import { ApiError } from '../../shared/types';
 import { currentUser, loadProfile, requireRole, toSessionUser } from '../auth';
-import { authClient } from '../supabase';
+import { authClient, db } from '../supabase';
 
 export const authRouter = Router();
 
@@ -15,7 +15,12 @@ authRouter.post('/auth/login', async (req, res) => {
   const { data, error } = await authClient.auth.signInWithPassword({ email: email.trim().toLowerCase(), password });
   if (error || !data.session) throw new ApiError('UNAUTHORIZED', 'Email or password is incorrect.');
   const profile = await loadProfile(data.user.id);
-  if (!profile) throw new ApiError('UNAUTHORIZED', 'This account has no staff profile.');
+  if (!profile) {
+    // A volunteer who registered (F26) has a login but no profile until a coordinator approves them.
+    const { data: app } = await db.from('volunteer_applications').select('status').eq('user_id', data.user.id).eq('status', 'PENDING').maybeSingle();
+    if (app) throw new ApiError('UNAUTHORIZED', 'Your volunteer application is waiting for a coordinator to approve it.');
+    throw new ApiError('UNAUTHORIZED', 'This account has no staff profile.');
+  }
   res.json({ token: data.session.access_token, user: toSessionUser(profile) });
 });
 

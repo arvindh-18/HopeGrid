@@ -5,7 +5,7 @@ reproduce. Nothing here was estimated.
 
 | | |
 |---|---|
-| Date | 2026-09-29, 19:25 IST |
+| Date | 2026-09-29, 19:25 IST; counts updated 2026-09-30 (volunteer registration F26, then the map radius BR-85) |
 | Machine | Apple M2, macOS 26.5.2 |
 | Node.js | v22.23.3 |
 | Test runner | Vitest 5.0.1 |
@@ -17,21 +17,21 @@ reproduce. Nothing here was estimated.
 | Check | Command | Result |
 |---|---|---|
 | Type check (frontend + tests, and strict server) | `npm run typecheck` | exit 0, no errors |
-| Business-rule unit tests | `npm test` (file `tests/rules.test.ts`) | 28 passed |
-| API integration tests | `npm test` (file `tests/integration/api.test.ts`) | 55 passed |
+| Business-rule unit tests | `npm test` (file `tests/rules.test.ts`) | 29 passed |
+| API integration tests | `npm test` (file `tests/integration/api.test.ts`) | 67 passed |
 | WhatsApp link builder | `npm test` (file `tests/whatsapp.test.ts`) | 2 passed |
-| **All tests** | `npm test` | **85 passed, 0 failed** (3 files, ~3.5 s — the live-signal tests wait for signal windows) |
-| Production build | `npm run build` | exit 0 (`built in 357ms`, 22 files precached) |
-| Tests catch real bugs | 13 deliberate code breaks, see §4 | 13 of 13 caught |
+| **All tests** | `npm test` | **98 passed, 0 failed** (3 files, ~3.6 s — the live-signal tests wait for signal windows) |
+| Production build | `npm run build` | exit 0 (`built in 347ms`, 22 files precached) |
+| Tests catch real bugs | 16 deliberate code breaks, see §4 | 16 of 16 caught |
 
-Output of `npx vitest run` (end), after the approved follow-ups (type rule BR-11a, live change signals):
+Output of `npx vitest run` (end), after adding the map radius (BR-85):
 ```
- Test Files  2 passed (2)
-      Tests  83 passed (83)
-   Duration  3.50s (tests 87%, transform 9%, import 3%)
+ Test Files  3 passed (3)
+      Tests  98 passed (98)
+   Duration  3.62s (tests 82%, transform 14%, import 5%)
 ```
-(Earlier runs: 68 tests after Phase 2, 74 after Phase 4. The suite was also run 3 times in a row after adding the
-stream tests: 83/83 each time.)
+(Earlier runs: 68 tests after Phase 2, 74 after Phase 4, 83 after the approved follow-ups, 85 with the WhatsApp link
+tests, 97 with volunteer registration. The suite was also run 3 times in a row after adding the stream tests: 83/83 each time.)
 
 ---
 
@@ -53,9 +53,9 @@ models, so the wiring is copied and must be kept in sync.
 
 ---
 
-## 3. What is covered (all 83 tests)
+## 3. What is covered (all 98 tests)
 
-### API integration tests (55)
+### API integration tests (67)
 **Report submission (F01, BR-02, BR-03)**
 - is idempotent: resending the same report returns the same code and creates nothing new, even when resent with a
   regenerated code
@@ -135,6 +135,18 @@ models, so the wiring is copied and must be kept in sync.
 - a victim's stream follows the report from before it has an incident until it is processed
 - the server stops listening when the client disconnects
 
+**Volunteer registration (F26, BR-150)** — 12 tests
+- full journey: apply → the row is PENDING, has no password in it, and the ID proof is in the private bucket →
+  logging in answers 401 "waiting for a coordinator to approve" → the admin list shows the application (equipment,
+  signed proof link, no `password` anywhere) → approve → approving again is `INVALID_STATE` → the same email and
+  password log in as VOLUNTEER → listed in `/admin/volunteers` → suggested for a new incident
+- reject needs a reason; afterwards the login is gone, the proof file is deleted, logging in says "Email or password
+  is incorrect.", and the same email can apply again
+- 8 bad applications are refused and leave nothing behind (no row, no login, no file): bad email, short password,
+  no skills, unknown skill, unknown equipment, malformed phone, no proof, a PNG instead of a JPEG
+- an email that already has an account is refused with "An account with this email already exists."
+- the application endpoints answer 401 without a token and 403 for a volunteer; nothing changes
+
 **Demo reset guard (F23)**
 - refused through the Cloudflare tunnel (`CF-Connecting-IP`), through any proxy (`X-Forwarded-For`) and for a
   public host name; allowed only as a direct request on the server laptop; the route doesn't exist when
@@ -167,8 +179,12 @@ backup.
 | M11 — the volunteer stream is not filtered | 1: "a volunteer's stream signals only the incidents they are assigned to" |
 | M12 — the victim stream sends the incident id | 1: "a victim's stream signals only their own report, and carries no ids" |
 | M13 — no merging of signals | 1: "the admin stream names each changed incident, once per burst of writes" |
+| M14 — approve without checking the application is still PENDING | 1: the full-journey test (the second approve fails on the duplicate profile instead of answering `INVALID_STATE`) |
+| M15 — reject without deleting the login | 1: "rejecting needs a reason, removes the login…" |
+| M16 — accept any file as ID proof (no JPEG check) | 1: "rejects an application with a PNG instead of a JPEG proof…" |
 
-Result: **13 of 13 breaks caught**. Apart from M7's knock-on failures, only the intended tests failed each time.
+Result: **16 of 16 breaks caught**. Apart from M7's knock-on failures, only the intended tests failed each time.
+M14–M16 (2026-09-30) were checked with the volunteer-registration group only (`vitest run tests/integration -t "Volunteer registration"`); the restored files were compared byte-for-byte with the backups.
 
 ---
 
@@ -179,6 +195,8 @@ Result: **13 of 13 breaks caught**. Apart from M7's knock-on failures, only the 
 | Upload signature check on real files | Files made with the bundled ffmpeg: WebM/Opus, MP4/AAC, Ogg/Opus audio, a JPEG, a PNG | 9 of 9 cases correct (valid files accepted; PNG as photo, MP4 labelled WebM, JPEG as audio, non-base64 rejected) |
 | Real browser recordings pass the check | Chrome 154 `MediaRecorder` (fake microphone) — default, `audio/webm`, `audio/mp4` | All accepted: `audio/webm;codecs=opus` (starts `1a45dfa3`), `audio/mp4;codecs=opus` (`ftyp` at byte 4) |
 | Live-signal client in a real browser | Headless Chrome, real frontend, stand-in API on a spare port, coordinator dashboard for 20 s | Stream live: no polling, refresh 40 ms after the one signal. Stream endpoint 404: polling every 5 s, no stream retries (docs/scaling.md §7) |
+| Map radius in a real browser (2026-09-30) | Headless Chrome, the built app, a stand-in API with hazards 1, 4 and 8 km from a simulated GPS position | 5 km (default) showed 2 pins, the dashed circle and "1 more is farther than 5 km."; 2 km → 1; 10 km → 3; the choice survived a reload; Tamil on a 390 px phone fits with no sideways scrolling; with location denied all 3 showed with the note |
+| Volunteer registration screens in a real browser (2026-09-30) | Headless Chrome, real frontend, stand-in API on a spare port. Phone size (390 px): filled the form, attached an ID photo, sent. Laptop: `/admin/volunteers` | Form sent the expected fields (no GPS, area "Anna Nagar", JPEG proof) and showed "Application received"; no sideways scrolling. Admin page showed "Waiting for review (2)" with proof photos, and the Volunteers tab listed 2 volunteers with a WhatsApp link for the one with a phone |
 | Vite dev proxy adds no forwarding headers | Echo server on :3000 behind the Vite proxy | No `X-Forwarded-For`/`CF-Connecting-IP`/`Forwarded`, so the DEV "Reset demo data" button still works |
 
 ---
@@ -189,6 +207,10 @@ Result: **13 of 13 breaks caught**. Apart from M7's knock-on failures, only the 
   PostgREST-specific quirks). TODO: needs verification — a run against a disposable Supabase project.
 - **Real AI and Whisper quality:** stubbed here. Measured separately in `docs/evaluation.md`.
 - **The browser UI:** no automated UI tests in the repo.
+- **Volunteer registration against real Supabase Auth:** the fake mimics `auth.admin.createUser`/`deleteUser`. TODO:
+  needs verification — after running `supabase/schema.sql`, register one test volunteer, approve, log in; register a
+  second, reject, and check the user is gone under Authentication → Users. The duplicate-email check relies on
+  Supabase's error text containing "already", "registered" or "exists".
 - **iPhone/Safari recordings** against the upload check: not tested (Safari can't be automated here). TODO: needs
   verification — record one voice note on an iPhone and submit it.
 - **A real Cloudflare tunnel** against the demo-reset guard: tested with the headers and host name a tunnel adds, but
