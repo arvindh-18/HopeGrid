@@ -5,6 +5,7 @@ import type {
   PublicIncident, ReportSubmission, Resource, ResourceInput, SessionUser, TrackView, UnableReason,
   AssignmentStatus, VolunteerAssignment, VolunteerProfile, VolunteerProfilePatch,
   ApplicationStatus, VolunteerApplication, VolunteerApplicationInput, VolunteerListItem, DispatchSettings, DispatchState,
+  HelpOfferInput, HelpOfferResult,
 } from '../../shared/types';
 import { realApi } from './realApi';
 
@@ -18,6 +19,8 @@ export interface Api {
   sendVictimMessage(code: string, pin: string, msg: OutgoingMessage): Promise<ChatMessage>;
   // Public
   getPublicIncidents(): Promise<{ generatedAt: string; incidents: PublicIncident[] }>;
+  /** F29: offer help on a hazard on the map (or join it, when a coordinator opened it to anyone). */
+  offerHelp(code: string, input: HelpOfferInput): Promise<HelpOfferResult>;
   // Auth
   login(email: string, password: string): Promise<{ token: string; user: SessionUser }>;
   me(): Promise<{ user: SessionUser }>;
@@ -35,6 +38,10 @@ export interface Api {
   assignVolunteer(id: string, volunteerId: string): Promise<IncidentDetail>;
   cancelAssignment(assignmentId: string): Promise<IncidentDetail>;
   allocateResource(id: string, resourceId: string, quantity: number): Promise<IncidentDetail>;
+  /** F29: let anyone join from the map (with the public task), or stop that. */
+  setOpenToAll(id: string, open: boolean, task?: string): Promise<IncidentDetail>;
+  acceptHelpOffer(id: string): Promise<IncidentDetail>;
+  declineHelpOffer(id: string): Promise<IncidentDetail>;
   getDispatch(): Promise<DispatchState>;
   saveDispatch(settings: DispatchSettings): Promise<DispatchState>;
   listResources(): Promise<Resource[]>;
@@ -46,6 +53,8 @@ export interface Api {
   listMyAssignments(): Promise<VolunteerAssignment[]>;
   updateAssignmentStatus(id: string, status: AssignmentStatus, reason?: UnableReason | string): Promise<VolunteerAssignment>;
   getAssignmentChat(id: string): Promise<{ open: boolean; threads: ChatThread[] }>;
+  /** F29: take a hazard from the public map that nobody has yet. */
+  takeIncident(code: string): Promise<VolunteerAssignment>;
   /** F28: this device's push address for SOS notifications (null stops them). */
   registerPushToken(token: string | null): Promise<{ ok: true }>;
   sendVolunteerMessage(id: string, reportId: string, msg: OutgoingMessage): Promise<ChatMessage>;

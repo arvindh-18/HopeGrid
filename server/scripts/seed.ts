@@ -46,7 +46,7 @@ async function must<T extends { error: { message: string } | null }>(p: PromiseL
 
 async function wipe(): Promise<void> {
   const all = <Q extends { not: (c: string, op: string, v: null) => Q }>(q: Q) => q.not('id', 'is', null);
-  for (const table of ['messages', 'allocations', 'incident_logs', 'assignments', 'reports']) {
+  for (const table of ['messages', 'allocations', 'incident_logs', 'help_offers', 'assignments', 'reports']) {
     await must(all(db.from(table).delete()), `Clearing ${table}`);
   }
   await must(all(db.from('incidents').update({ possible_duplicate_of: null, merged_into: null })), 'Clearing incident links');

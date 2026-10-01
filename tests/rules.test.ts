@@ -6,6 +6,8 @@ import { rankVolunteers, type MatchVolunteer } from '../shared/volunteerMatch';
 import { isPublic, markerColor, toPublicIncident, withinRadius } from '../shared/publicView';
 import { victimStep } from '../shared/trackingStatus';
 import { encodeSmsReport, parseSmsReport } from '../shared/sms';
+import { checkHelpOffer, checkPublicTask, helpOptions } from '../shared/communityHelp';
+import { cleanTranslation, isSpeechLang, speechEngine, speechLanguage } from '../shared/speech';
 import {
   checkDispatchSettings, expiredOffers, incidentsToDispatch, parseVolunteerReply, sosPush, sosSms, sosSummary, waitingIncidents,
 } from '../shared/dispatch';
@@ -208,7 +210,7 @@ describe('BR-80 public view', () => {
     expect(p.area).toBeNull();
     expect(p.lat).toBe(13.041);
     expect(Object.keys(p).sort()).toEqual(
-      ['advice', 'area', 'code', 'color', 'confidenceBand', 'lat', 'lng', 'priority', 'reportCount', 'status', 'type', 'updatedAt', 'verified'].sort(),
+      ['advice', 'area', 'code', 'color', 'confidenceBand', 'helpArranged', 'lat', 'lng', 'openToAll', 'priority', 'reportCount', 'status', 'task', 'type', 'updatedAt', 'verified'].sort(),
     );
   });
   it('marker colours', () => {
@@ -377,5 +379,88 @@ describe('F28 auto-dispatch rules (BR-160…BR-164)', () => {
     expect(summary).toBe('Flood, Critical priority, 3 people, trapped, vulnerable person at Canal Road, near the temple, 1.2 km away');
     expect(sosSms(i, summary, 3)).toBe(`HopeGrid SOS #WF22W: ${summary}. Reply YES WF22W to accept or NO WF22W to decline within 3 min.`);
     expect(sosPush(i, summary, 3)).toEqual({ title: 'SOS #WF22W: help needed', body: `${summary}. Accept or decline within 3 min.` });
+  });
+});
+
+describe('F29 community help from the map (BR-170…BR-174)', () => {
+  const offer = { name: '  Arun  Kumar ', phone: '+91 98400 11122', kinds: ['BOAT', 'HANDS', 'BOAT'], note: ' Have a small boat ', deviceId: 'd1' };
+  it('checks an offer and cleans it up (BR-170)', () => {
+    expect(checkHelpOffer(offer)).toEqual({ name: 'Arun Kumar', phone: '+919840011122', kinds: ['BOAT', 'HANDS'], note: 'Have a small boat', deviceId: 'd1' });
+    expect(typeof checkHelpOffer({ ...offer, name: 'A' })).toBe('string');
+    expect(typeof checkHelpOffer({ ...offer, phone: '12' })).toBe('string');
+    expect(typeof checkHelpOffer({ ...offer, kinds: ['HELICOPTER'] })).toBe('string');
+    expect(typeof checkHelpOffer({ ...offer, note: 'x'.repeat(301) })).toBe('string');
+    expect(typeof checkHelpOffer({ ...offer, deviceId: '' })).toBe('string');
+    expect(checkPublicTask('  Carry  sandbags; meet at the temple gate ')).toBe('Carry sandbags; meet at the temple gate');
+    expect(checkPublicTask('go')).toBeNull();
+    expect(checkPublicTask('x'.repeat(201))).toBeNull();
+  });
+
+  it('lets volunteers take, the public offer, and anyone join only when opened (BR-171)', () => {
+    const active = { status: 'ACTIVE' as const, helpArranged: false, openToAll: false };
+    expect(helpOptions(active, true)).toEqual({ take: true, offer: false, join: false });
+    expect(helpOptions(active, false)).toEqual({ take: false, offer: true, join: false });
+    expect(helpOptions({ ...active, status: 'RESPONDING', helpArranged: true }, false)).toEqual({ take: false, offer: false, join: false });
+    expect(helpOptions({ ...active, status: 'RESPONDING', helpArranged: true }, true)).toEqual({ take: false, offer: false, join: false });
+    expect(helpOptions({ ...active, status: 'RESPONDING', helpArranged: true, openToAll: true }, false)).toEqual({ take: false, offer: false, join: true });
+    expect(helpOptions({ ...active, status: 'RESOLVED', openToAll: true }, false)).toEqual({ take: false, offer: false, join: false });
+  });
+
+  it('shows the public task only while open, and merges keep an incident open (BR-172)', () => {
+    const src = {
+      code: 'ABCDE', type: 'FLOOD' as const, status: 'VERIFIED' as const, lat: 13.04, lng: 80.23, publicArea: 'Canal Road', verifiedAt: minsAgo(5),
+      resolvedAt: null, confidence: 60, effectivePriority: 'HIGH' as const, reportCount: 3, updatedAt: minsAgo(1), openToAll: true, publicTask: 'Sandbags at the canal wall',
+    };
+    expect(toPublicIncident(src)).toMatchObject({ openToAll: true, task: 'Sandbags at the canal wall', helpArranged: false });
+    expect(toPublicIncident({ ...src, openToAll: false })).toMatchObject({ openToAll: false, task: null });
+    expect(toPublicIncident({ ...src, status: 'IN_PROGRESS' })).toMatchObject({ helpArranged: true });
+    expect(toPublicIncident({ ...src, status: 'RESOLVED', resolvedAt: minsAgo(5) })).toMatchObject({ openToAll: false, task: null });
+  });
+});
+
+describe('BR-12 which speech engine hears a voice note', () => {
+  it("trusts Whisper's guess among English, Tamil and Hindi, even against the app's language", () => {
+    expect(speechLanguage('ta', null)).toBe('ta');
+    expect(speechLanguage('hi', 'ta')).toBe('hi'); // Hindi speech in a Tamil app: the languages are too different to mix up
+    expect(speechLanguage('en', 'ta')).toBe('en'); // English speech in a Tamil app
+  });
+
+  it('corrects the neighbours Whisper mixes up: Urdu is Hindi, Malayalam is Tamil', () => {
+    expect(speechLanguage('ur', null)).toBe('hi');
+    expect(speechLanguage('ml', null)).toBe('ta');
+    expect(speechLanguage('ur', 'en')).toBe('hi');
+  });
+
+  it("uses the app's Tamil or Hindi when Whisper hears some other language; otherwise Whisper keeps it", () => {
+    expect(speechLanguage('te', 'ta')).toBe('ta');
+    expect(speechLanguage('mr', 'hi')).toBe('hi');
+    expect(speechLanguage('te', 'en')).toBeNull();
+    expect(speechLanguage('te', null)).toBeNull();
+  });
+
+  it("falls back to the app's language when Whisper can't guess (not installed, or no speech)", () => {
+    expect(speechLanguage(null, 'hi')).toBe('hi');
+    expect(speechLanguage(null, 'en')).toBe('en');
+    expect(speechLanguage(null, null)).toBeNull();
+  });
+
+  it('sends Tamil and Hindi to IndicConformer, English to Parakeet, any other language to Whisper', () => {
+    expect(speechEngine('ta')).toBe('INDICCONFORMER');
+    expect(speechEngine('hi')).toBe('INDICCONFORMER');
+    expect(speechEngine('en')).toBe('PARAKEET');
+    expect(speechEngine(null)).toBe('WHISPER');
+  });
+
+  it('accepts only the three app languages as a hint', () => {
+    expect(['en', 'ta', 'hi'].every(isSpeechLang)).toBe(true);
+    expect([null, undefined, 'fr', 'TA', 1].some(isSpeechLang)).toBe(false);
+  });
+
+  it('tidies the English translation and drops one that adds nothing', () => {
+    expect(cleanTranslation('  "Water entered our house."  ', 'x')).toBe('Water entered our house.');
+    expect(cleanTranslation('English translation: Two people are trapped', 'x')).toBe('Two people are trapped');
+    expect(cleanTranslation('<text>Help us</text>', 'x')).toBe('Help us');
+    expect(cleanTranslation('   ', 'x')).toBeNull();
+    expect(cleanTranslation('Velachery', 'Velachery')).toBeNull();
   });
 });

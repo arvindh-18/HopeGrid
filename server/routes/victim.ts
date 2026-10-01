@@ -6,6 +6,7 @@ import {
   CODE_ALPHABET, DEMO_OTP, MAX_AUDIO_BASE64, MAX_AUDIO_SECONDS, MAX_PEOPLE, MAX_PHOTO_BASE64, MIN_REPORT_TEXT,
   PHONE_MAX_DIGITS, PHONE_MIN_DIGITS, PIN_LENGTH, REPORT_CODE_LENGTH,
 } from '../../shared/constants';
+import { isSpeechLang } from '../../shared/speech';
 import { victimStep } from '../../shared/trackingStatus';
 import {
   ApiError, CHAT_OPEN_ASSIGNMENT, NEEDS,
@@ -91,6 +92,7 @@ function validateSubmission(body: unknown): ReportSubmission {
       throw invalid(`Voice note must be at most ${MAX_AUDIO_SECONDS} seconds.`);
     }
   }
+  if (!(b.language === null || b.language === undefined || isSpeechLang(b.language))) throw invalid('Language is not supported.');
 
   const locationText = isStr(b.locationText) && b.locationText.trim() ? b.locationText.trim() : null;
   const needs = [...new Set(b.needs as Need[])];
@@ -117,6 +119,7 @@ function validateSubmission(body: unknown): ReportSubmission {
     audioBase64: hasAudio ? (b.audioBase64 as string) : null,
     audioMime: hasAudio ? (b.audioMime as string) : null,
     audioSeconds: hasAudio ? Math.round(b.audioSeconds as number) : null,
+    language: isSpeechLang(b.language) ? b.language : null,
     createdAt: new Date(b.createdAt).toISOString(),
   };
 }
@@ -150,6 +153,7 @@ async function completeSmsReport(sms: ReportRecord, sub: ReportSubmission): Prom
       deviceId: sub.deviceId,
       photoPath: paths.photoPath ?? sms.photoPath,
       ...(paths.audioPath ? { audioPath: paths.audioPath, audioSeconds: sub.audioSeconds, transcript: null, transcriptStatus: 'NONE' } : {}),
+      appLanguage: sub.language ?? sms.appLanguage,
       pendingMedia: [], completedAt: new Date().toISOString(),
       extraction: null, aiSource: null, processingStatus: 'PENDING', // read again (pipeline: later details)
     })).eq('id', sms.id);

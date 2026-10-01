@@ -35,6 +35,12 @@ Background for every item is in `PROJECT.md` (kept in ~/Downloads) and in `CHANG
       `completed_at` to `reports` (safe to re-run; nothing is deleted). Until then the server prints a warning at
       startup and the coordinator dashboard can't load.
 
+### Community help (F29)
+- [ ] **Run `supabase/schema.sql` again** (adds the `help_offers` table and `incidents.open_to_all` / `public_task`),
+      then restart `npm start`.
+- [ ] Try it: verify a test incident, then on a phone open the map → the hazard → "Offer help"; accept it on the
+      incident page. Then "Open to anyone" with a task and join from the map. Log in as a volunteer and "take" another.
+
 ### Auto-dispatch (F28)
 - [ ] **Run `supabase/schema.sql` again** (adds `assignments.auto` / `respond_by`, `incidents.auto_dispatched_at`,
       `profiles.push_token` and the `settings` table). Then restart `npm start`.
@@ -56,8 +62,9 @@ Background for every item is in `PROJECT.md` (kept in ~/Downloads) and in `CHANG
 ### Running the app
 - [ ] **Restart the dev server.** Stop the old Vite still running on port 5173 (started 09:26), then run `npm run dev`.
       It predates the package changes and the new language files.
-- [ ] Confirm the server log shows **"AI model ready"** and **"Speech model ready"** on the laptop that will host the demo.
-      If not, run `npm run setup-ai` there, once, about 2.5 GB.
+- [ ] Confirm the server log shows **"AI model ready"** and **"Speech models ready: Whisper, Parakeet English,
+      IndicConformer Tamil, IndicConformer Hindi"** on the laptop that will host the demo. If any is missing, run
+      `npm run setup-ai` there (about 3.3 GB the first time; it keeps files already downloaded).
 
 ---
 
@@ -75,6 +82,10 @@ Background for every item is in `PROJECT.md` (kept in ~/Downloads) and in `CHANG
 - [ ] **Record a demo video** and link it in `docs/impact-and-deployment.md` §8.
 - [ ] **Choose a licence** (e.g. MIT or AGPL-3.0) and add a `LICENSE` file. `docs/comparison.md` currently says "no licence
       file yet".
+- [ ] **Know the model licences** (README → First-time setup). The AI model, Qwen 2.5 **3B**, is under the Qwen Research
+      License (research and non-commercial use). Fine for a hackathon; a real deployment should switch to an
+      Apache-2.0 size (1.5B, or 7B with 16 GB RAM, `AI_MODEL=…`) and re-run `eval/run.ts`. Parakeet (CC-BY-4.0) needs
+      credit to NVIDIA, as the README gives.
 - [ ] Approach one candidate partner (DDMA, NGO or college NSS unit) and record the outcome, not the plan.
 
 ## 🟠 Before the demo
@@ -85,7 +96,10 @@ Background for every item is in `PROJECT.md` (kept in ~/Downloads) and in `CHANG
 - [ ] Test the language picker on a real Android phone and a real iPhone: fonts, text fitting in buttons, choice
       remembered after reload.
 - [ ] **End-to-end voice test on a phone in Hindi and in Tamil:** record → send → admin incident shows the original
-      transcript + an "English:" line + sensible type and flags. So far only tested on the laptop with synthetic voices.
+      transcript (Tamil or Devanagari script) + an "English:" line + sensible type and flags. The speech engines are
+      measured on real FLEURS recordings (docs/evaluation.md §5b), but not yet through a phone's microphone.
+- [ ] **Record your own clips** (`npm run eval:asr -- record ta|hi|en`, then `compare`): stressed speech, real
+      background noise and Tamil/Hindi mixed with English words are still untested.
 - [ ] Test a **typed** Hindi report while offline: "Report sent" should show a sensible preview (keywords).
 - [ ] Decide what to say in the pitch about typed Tamil/Hindi: the 3B AI is weaker there; the form choices and
       keywords compensate.
@@ -147,5 +161,9 @@ Background for every item is in `PROJECT.md` (kept in ~/Downloads) and in `CHANG
 - [ ] Safety net for AI misses: let keyword flags from the original text (trapped, vulnerable, medical) *raise* the AI's
       flags, never lower them. Needs a rules change in `docs/rules.md`.
 - [ ] Better AI for Indian languages if the server laptop has 16 GB RAM: `AI_MODEL=hf:Qwen/Qwen2.5-7B-Instruct-GGUF:Q4_K_M` (~4.7 GB).
-- [ ] Better Tamil/Hindi speech: try Whisper `large-v3-turbo` (quantised, ~550 MB) via `WHISPER_MODEL`.
+- [ ] Better English version of Tamil voice notes: the 3B AI's Tamil → English is weak (chrF ~27 even from a perfect
+      transcript, docs/evaluation.md §5b). AI4Bharat's IndicTrans2 (MIT, distilled 200M) is built for this but needs a
+      new runtime dependency (onnxruntime-node) and an ONNX export — ask before adding.
+- [ ] Measure English on Indian-accented speech: AI4Bharat's Svarah test set needs a Hugging Face login (gated).
+      Parakeet vs Whisper was measured on FLEURS (US speakers) and on synthetic en-IN voices only.
 - [ ] Real SMS OTP and real emergency-service escalation (currently simulated).

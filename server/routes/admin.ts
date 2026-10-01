@@ -1,13 +1,13 @@
 // server/routes/admin.ts — all /api/admin/* routes (role ADMIN). Status changes follow BR-100…BR-104 and are
 // validated here before every change (AR-16); every incident change writes a log (AR-17).
 import { Router } from 'express';
-import { MAX_PEOPLE } from '../../shared/constants';
+import { MAX_PEOPLE, PUBLIC_TASK_MAX } from '../../shared/constants';
 import { distanceBetween, findRelated, mergeFields } from '../../shared/linking';
 import { confidenceBand, effectivePriority, priorityRank } from '../../shared/scoring';
 import {
   ACTIVE_ASSIGNMENT, ACTIVE_STATUSES, ApiError, INCIDENT_TYPES, NEEDS, PRIORITY_LEVELS, RESOURCE_CATEGORIES,
   type AllocationRecord, type ApplicationRecord, type ApplicationStatus, type AssignmentRecord, type IncidentDetail, type IncidentListItem, type IncidentRecord,
-  type IncidentType, type LogRecord, type Need, type PriorityLevel, type ProfileRecord, type ReportRecord,
+  type HelpOfferRecord, type IncidentType, type LogRecord, type Need, type PriorityLevel, type ProfileRecord, type ReportRecord,
   type ResourceInput, type ResourceRecord, type VolunteerApplication, type VolunteerListItem,
 } from '../../shared/types';
 import { humanize, isEligible, rankVolunteers } from '../../shared/volunteerMatch';
@@ -16,7 +16,10 @@ import { fromRow, fromRows, toRow } from '../mappers';
 import {
   addLog, allAssignments, endAssignment, getIncident, isUuid, recomputeIncident, reportsOf, toLink, updateIncident,
 } from '../pipeline';
+import { checkPublicTask } from '../../shared/communityHelp';
+import { isPublic } from '../../shared/publicView';
 import { createAssignment, dispatchState, runDispatch, saveDispatchSettings } from '../dispatch';
+import { sendSms } from '../smsGateway';
 import { openStream } from '../events';
 import { removeFiles, signedUrls } from '../storage';
 import { db } from '../supabase';
@@ -44,7 +47,7 @@ const activeOf = (asg: AssignmentRecord[]) => asg.find((a) => ACTIVE_ASSIGNMENT.
 
 // ---------------------------------------------------------------- read models
 
-function listItem(i: IncidentRecord, reports: Pick<ReportRecord, 'audioPath' | 'channel'>[], asg: AssignmentRecord[], dupCode: string | null): IncidentListItem {
+function listItem(i: IncidentRecord, reports: Pick<ReportRecord, 'audioPath' | 'channel'>[], asg: AssignmentRecord[], dupCode: string | null, pendingHelpOffers = 0): IncidentListItem {
   const active = activeOf(asg);
   const latest = asg[asg.length - 1];
   return {
@@ -52,7 +55,7 @@ function listItem(i: IncidentRecord, reports: Pick<ReportRecord, 'audioPath' | '
     priority: effectivePriority(i.priority, i.priorityOverride), overridden: i.priorityOverride !== null,
     confidence: i.confidence, confidenceBand: confidenceBand(i.confidence), people: i.people, locationText: i.locationText,
     reportCount: reports.length, hasVoice: reports.some((r) => !!r.audioPath), viaSms: reports.some((r) => r.channel === 'SMS'),
-    possibleDuplicateCode: dupCode,
+    pendingHelpOffers, possibleDuplicateCode: dupCode,
     // BR-103 derived flags
     needsReassign: (i.status === 'NEW' || i.status === 'VERIFIED') && !active && asg.some((a) => a.status === 'DECLINED' || a.status === 'UNABLE'),
     readyToResolve: i.status === 'IN_PROGRESS' && latest?.status === 'DONE',
@@ -63,7 +66,7 @@ function listItem(i: IncidentRecord, reports: Pick<ReportRecord, 'audioPath' | '
 
 async function detail(id: string): Promise<IncidentDetail> {
   const i = await getIncident(id);
-  const [reports, assignments, volunteers, allocations, resources, logs, messages, others] = await Promise.all([
+  const [reports, assignments, volunteers, allocations, resources, logs, messages, others, offers] = await Promise.all([
     reportsOf(id),
     allAssignments(),
     rows<ProfileRecord>(db.from('profiles').select('*').eq('role', 'VOLUNTEER'), 'Volunteer lookup failed'),
@@ -72,6 +75,7 @@ async function detail(id: string): Promise<IncidentDetail> {
     rows<LogRecord>(db.from('incident_logs').select('*').eq('incident_id', id).order('created_at', { ascending: false }), 'Log lookup failed'),
     messagesWhere('incident_id', id),
     rows<IncidentRecord>(db.from('incidents').select('*').neq('status', 'MERGED').neq('id', id), 'Incident lookup failed'),
+    rows<HelpOfferRecord>(db.from('help_offers').select('*').eq('incident_id', id).order('created_at', { ascending: false }), 'Help offer lookup failed'),
   ]);
   const asg = assignments.filter((a) => a.incidentId === id);
   const dup = i.possibleDuplicateOf ? others.find((o) => o.id === i.possibleDuplicateOf) ?? null : null;
@@ -82,7 +86,7 @@ async function detail(id: string): Promise<IncidentDetail> {
   const phoneOf = (vid: string) => volunteers.find((v) => v.id === vid)?.phone ?? null; // coordinators only: for the WhatsApp button
 
   return {
-    ...listItem(i, reports, asg, dup?.code ?? null),
+    ...listItem(i, reports, asg, dup?.code ?? null, offers.filter((o) => o.status === 'PENDING').length),
     lat: i.lat, lng: i.lng, publicArea: i.publicArea, vulnerable: i.vulnerable, trapped: i.trapped, medical: i.medical,
     danger: i.danger, needs: i.needs, summary: i.summary, confidenceReasons: i.confidenceReasons, priorityScore: i.priorityScore,
     computedPriority: i.priority, priorityReasons: i.priorityReasons, overrideReason: i.overrideReason,
@@ -114,6 +118,8 @@ async function detail(id: string): Promise<IncidentDetail> {
       reportId: r.id, label: `Reporter ${n + 1}`,
       messages: chatMessages.filter((_, k) => messages[k].reportId === r.id),
     })),
+    openToAll: !!i.openToAll, publicTask: i.publicTask ?? null,
+    helpOffers: offers.map(({ id: oid, name, phone, kinds, note, status, createdAt, reviewedAt }) => ({ id: oid, name, phone, kinds, note, status, createdAt, reviewedAt })),
   };
 }
 
@@ -126,10 +132,11 @@ adminRouter.get('/events', (_req, res) => {
 
 // GET /api/admin/incidents → {counts, incidents} ordered per BR-120
 adminRouter.get('/incidents', async (_req, res) => {
-  const [incidents, reports, assignments] = await Promise.all([
+  const [incidents, reports, assignments, offers] = await Promise.all([
     rows<IncidentRecord>(db.from('incidents').select('*').neq('status', 'MERGED'), 'Incident lookup failed'),
     rows<Pick<ReportRecord, 'incidentId' | 'audioPath' | 'channel'>>(db.from('reports').select('incident_id, audio_path, channel').not('incident_id', 'is', null), 'Report lookup failed'),
     allAssignments(),
+    rows<Pick<HelpOfferRecord, 'incidentId'>>(db.from('help_offers').select('incident_id').eq('status', 'PENDING'), 'Help offer lookup failed'),
   ]);
   const codeOf = new Map(incidents.map((i) => [i.id, i.code]));
   const items = incidents.map((i) => listItem(
@@ -137,6 +144,7 @@ adminRouter.get('/incidents', async (_req, res) => {
     reports.filter((r) => r.incidentId === i.id),
     assignments.filter((a) => a.incidentId === i.id),
     i.possibleDuplicateOf ? codeOf.get(i.possibleDuplicateOf) ?? null : null,
+    offers.filter((o) => o.incidentId === i.id).length,
   ));
   const counts: Record<PriorityLevel, number> = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
   items.filter((i) => ACTIVE_STATUSES.includes(i.status)).forEach((i) => counts[i.priority]++);
@@ -284,7 +292,7 @@ adminRouter.post('/incidents/:id/merge', async (req, res) => {
   if (activeOf(assignments.filter((a) => a.incidentId === s.id)) && activeOf(assignments.filter((a) => a.incidentId === t.id))) {
     throw new ApiError('INVALID_STATE', 'Cancel one of the active assignments first.');
   }
-  for (const table of ['reports', 'assignments', 'allocations', 'messages']) {
+  for (const table of ['reports', 'assignments', 'allocations', 'messages', 'help_offers']) {
     const { error } = await db.from(table).update({ incident_id: t.id }).eq('incident_id', s.id);
     if (error) throw new Error(`Moving ${table} failed: ${error.message}`);
   }
@@ -330,6 +338,56 @@ adminRouter.post('/incidents/:id/assign', async (req, res) => {
   // A coordinator chose this volunteer: a person has judged the incident (BR-165), so it may reach the public map.
   await updateIncident(i.id, i.autoDispatchedAt ? { autoDispatchedAt: null } : {});
   res.json(await detail(i.id));
+});
+
+// ---------------------------------------------------------------- community help (F29, BR-172, BR-173)
+
+// POST /api/admin/incidents/:id/open {open: boolean, task?: string} — let anyone join from the public map (BR-172)
+adminRouter.post('/incidents/:id/open', async (req, res) => {
+  const i = await getIncident(req.params.id);
+  const open = req.body?.open === true;
+  if (open) {
+    requireActive(i, 'opened to anyone');
+    const reports = await reportsOf(i.id);
+    if (!isPublic({ ...i, effectivePriority: i.priority, reportCount: reports.length })) {
+      throw new ApiError('INVALID_STATE', 'Verify this incident first: only incidents on the public map can be opened to anyone.');
+    }
+    const task = checkPublicTask(req.body?.task);
+    if (!task) throw invalid(`Describe the task and where to meet (5–${PUBLIC_TASK_MAX} characters). Everyone on the map can read it.`);
+    await updateIncident(i.id, { openToAll: true, publicTask: task });
+    await addLog(i.id, `Opened to anyone on the public map: "${task}"`, false);
+  } else if (i.openToAll) {
+    await updateIncident(i.id, { openToAll: false });
+    await addLog(i.id, 'Closed to the public: offers are reviewed again', false);
+  }
+  res.json(await detail(i.id));
+});
+
+async function reviewOffer(id: string, status: 'ACCEPTED' | 'DECLINED'): Promise<IncidentDetail> {
+  const [o] = isUuid(id) ? await rows<HelpOfferRecord>(db.from('help_offers').select('*').eq('id', id), 'Help offer lookup failed') : [];
+  if (!o) throw new ApiError('NOT_FOUND', 'This help offer does not exist.');
+  if (o.status !== 'PENDING') throw new ApiError('INVALID_STATE', 'This offer has already been answered.');
+  const { data, error } = await db.from('help_offers').update({ status, reviewed_at: nowIso() }).eq('id', o.id).eq('status', 'PENDING').select('id');
+  if (error) throw new Error(`Help offer update failed: ${error.message}`);
+  if (!data?.length) throw new ApiError('INVALID_STATE', 'This offer has already been answered.');
+  const i = await getIncident(o.incidentId);
+  if (status === 'ACCEPTED') {
+    await addLog(i.id, `Help offer from ${o.name} accepted`, false);
+    await addLog(i.id, 'A helper from the community has been arranged by the coordination team', true);
+    void sendSms(o.phone, `HopeGrid: thank you, ${o.name}. The coordination team accepted your offer to help with #${i.code} and will call you with the details.`);
+  } else {
+    await addLog(i.id, `Help offer from ${o.name} declined`, false);
+    void sendSms(o.phone, `HopeGrid: thank you for offering to help with #${i.code}. It is covered for now; we may contact you for other tasks.`);
+  }
+  return detail(i.id);
+}
+
+// POST /api/admin/help-offers/:id/accept | /decline (BR-173)
+adminRouter.post('/help-offers/:id/accept', async (req, res) => {
+  res.json(await reviewOffer(req.params.id, 'ACCEPTED'));
+});
+adminRouter.post('/help-offers/:id/decline', async (req, res) => {
+  res.json(await reviewOffer(req.params.id, 'DECLINED'));
 });
 
 // GET /api/admin/dispatch → DispatchState; PUT {mode, threshold, responseMinutes} → DispatchState (F28, BR-160)

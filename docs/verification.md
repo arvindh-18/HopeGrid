@@ -5,7 +5,7 @@ reproduce. Nothing here was estimated.
 
 | | |
 |---|---|
-| Date | 2026-09-29, 19:25 IST; counts updated 2026-09-30 (volunteer registration F26, map radius BR-85, Android app, reports by SMS F27, auto-dispatch F28) |
+| Date | 2026-09-29, 19:25 IST; counts updated 2026-09-30 (volunteer registration F26, map radius BR-85, Android app, reports by SMS F27, auto-dispatch F28, community help F29) and 2026-10-01 (speech routing BR-12) |
 | Machine | Apple M2, macOS 26.5.2 |
 | Node.js | v22.23.3 |
 | Test runner | Vitest 5.0.1 |
@@ -17,13 +17,14 @@ reproduce. Nothing here was estimated.
 | Check | Command | Result |
 |---|---|---|
 | Type check (frontend + tests, and strict server) | `npm run typecheck` | exit 0, no errors |
-| Business-rule unit tests | `npm test` (file `tests/rules.test.ts`) | 42 passed |
-| API integration tests | `npm test` (file `tests/integration/api.test.ts`) | 81 passed |
+| Business-rule unit tests | `npm test` (file `tests/rules.test.ts`) | 52 passed |
+| API integration tests | `npm test` (file `tests/integration/api.test.ts`) | 87 passed |
+| Speech routing with stand-in engines | `npm test` (file `tests/transcribe.test.ts`) | 8 passed |
 | WhatsApp link builder | `npm test` (file `tests/whatsapp.test.ts`) | 2 passed |
 | Android app server address | `npm test` (file `tests/serverUrl.test.ts`) | 2 passed |
-| **All tests** | `npm test` | **127 passed, 0 failed** (4 files — the live-signal tests wait for signal windows) |
+| **All tests** | `npm test` | **151 passed, 0 failed** (5 files — the live-signal tests wait for signal windows) |
 | Production build | `npm run build` | exit 0 (`built in 347ms`, 22 files precached) |
-| Tests catch real bugs | 27 deliberate code breaks, see §4 | 27 of 27 caught (M23 after tightening its test) |
+| Tests catch real bugs | 43 deliberate code breaks, see §4 | 43 of 43 caught (M23 and M30 after tightening their tests) |
 
 Output of `npx vitest run` (end), after adding reports by SMS:
 ```
@@ -32,7 +33,7 @@ Output of `npx vitest run` (end), after adding reports by SMS:
    Duration  3.84s (tests 74%, transform 20%, import 5%)
 ```
 (Earlier runs: 68 tests after Phase 2, 74 after Phase 4, 83 after the approved follow-ups, 85 with the WhatsApp link
-tests, 97 with volunteer registration, 98 with the map radius, 102 with the Android app, 114 with reports by SMS, 127 with auto-dispatch. The suite was also run 3 times in a row after adding the stream tests: 83/83 each time.)
+tests, 97 with volunteer registration, 98 with the map radius, 102 with the Android app, 114 with reports by SMS, 127 with auto-dispatch, 135 with community help, 151 with speech routing. The suite was also run 3 times in a row after adding the stream tests: 83/83 each time.)
 
 ---
 
@@ -46,7 +47,7 @@ real data or run a model (rules.md AR-31):
 |---|---|---|
 | Supabase (Postgres, Storage, Auth) | `tests/integration/fakeSupabase.ts`: in-memory tables **built by reading `supabase/schema.sql`** | Enforces the schema's defaults, NOT NULL, UNIQUE, CHECK and foreign keys; rejects unknown columns; refuses UPDATE/DELETE without a filter (as Supabase does) |
 | The local LLM | `tests/integration/stubs.ts`: replaces only the `node-llama-cpp` calls | `server/ai.ts` still runs its real prompt, `coerce()` clean-up and keyword fallback |
-| Whisper | `tests/integration/stubs.ts`: `transcribe()` returns a set transcript or throws | The pipeline's handling of transcripts, translations and failures is real |
+| Speech engines | API tests: `tests/integration/stubs.ts` replaces `transcribe()` (a set transcript, or an error). `tests/transcribe.test.ts` replaces only Whisper, Parakeet, IndicConformer and the AI's translate call | The pipeline's handling of transcripts, translations and failures is real; so are the language choice, engine choice, fallbacks and ffmpeg in `server/transcribe.ts` |
 
 The app is wired by `tests/integration/testApp.ts` in the same order and with the same error envelope as
 `server/index.ts`. `server/index.ts` can't be imported in tests, because importing it starts the server and loads the
@@ -54,9 +55,9 @@ models, so the wiring is copied and must be kept in sync.
 
 ---
 
-## 3. What is covered (all 127 tests)
+## 3. What is covered (all 151 tests)
 
-### API integration tests (81)
+### API integration tests (87)
 **Report submission (F01, BR-02, BR-03)**
 - is idempotent: resending the same report returns the same code and creates nothing new, even when resent with a
   regenerated code
@@ -74,7 +75,9 @@ models, so the wiring is copied and must be kept in sync.
   victim's own answers win (people 3; needs unioned)
 - report text can't take actions: extra fields in model output (`status: "RESOLVED"`, `verified: true`) are ignored
   (AR-20)
-- non-English voice notes are stored as original + `English:` line, and the AI receives both
+- non-English voice notes are stored as original + `English:` line, and the AI receives both; the app's language
+  reaches the speech engine and is stored (`app_language`); an older app's report without one works; a language the
+  app doesn't offer is refused
 - a failed transcription still creates the incident and tells staff to listen to the recording
 - restart recovery: `PENDING` reports are processed; a half-finished report does not create a second incident
 
@@ -179,17 +182,37 @@ is intercepted
 - with a generated service-account key: the push goes to the registered token with the Google token, whose JWT
   signature verifies with the public key; Firebase's UNREGISTERED clears the token
 
+**Community help from the map (F29, BR-170…BR-174)**
+- an offer on a NEW incident is 404 (not on the map); after verification it is stored (PENDING) with the cleaned
+  phone, once per phone; bad phone or unknown kind is 400; the dashboard counts it and the incident page lists it
+  with the phone; the public feed contains neither the name nor the phone
+- accept / decline (twice is 409; a volunteer gets 403) with an SMS to each helper; the reporter's tracking shows "A
+  helper from the community has been arranged…" and not the helper's name
+- opening to anyone is 409 before verification and 400 without a proper task; once open, joining works even with an
+  accepted volunteer (JOINED + task); closing hides the task, and offers are then refused while a volunteer has it
+- a volunteer takes a verified hazard from the map: ACCEPTED, BUSY, IN_PROGRESS, `helpArranged` on the map; a second
+  volunteer, a public offer, and a hazard already offered to someone else are refused, with nothing created
+- offers move with a merge; the clean-up plans and deletes them before the incident
+
 **Demo reset guard (F23)**
 - refused through the Cloudflare tunnel (`CF-Connecting-IP`), through any proxy (`X-Forwarded-For`) and for a
   public host name; allowed only as a direct request on the server laptop; the route doesn't exist when
   `DEV_MODE` is off
 
-### Business-rule unit tests (42)
+### Business-rule unit tests (52)
 Keyword extraction in English, Tamil and Hindi · the incident-type rule (BR-11a) · confidence · priority and
 escalation · duplicates and related incidents · merge fields · volunteer ranking · public view (including the
 stricter BR-80) · victim tracking steps · the SMS format (pack/unpack, shortening, bad headers, unreadable lines;
 BR-06) · later details only add facts (BR-07) · dispatch settings, waiting order, overload threshold, deadlines,
-YES/NO answers, SOS text and the auto-dispatch public-map rule (BR-160…BR-165).
+YES/NO answers, SOS text and the auto-dispatch public-map rule (BR-160…BR-165) · which language and speech engine
+(Whisper's neighbour mix-ups, the app's language, BR-12) · tidying the English translation.
+
+### Speech routing (8, `tests/transcribe.test.ts`)
+The real `server/transcribe.ts` with stand-in engines and the real ffmpeg: Tamil goes to IndicConformer and the
+local AI writes the English; Urdu is heard as Hindi; English goes to Parakeet with no translation; Whisper takes over
+(told the language) when IndicConformer fails or Parakeet is missing; Whisper's translate pass when the AI can't
+translate; another language in an English app stays with Whisper; without Whisper the app's Tamil still reaches
+IndicConformer, and with no hint either it fails; nothing heard → an error (the pipeline marks it FAILED).
 
 ---
 
@@ -228,8 +251,24 @@ backup.
 | M25 — phone numbers must match exactly (breaks "yes" sent without +91) | 1: the SMS-answer test |
 | M26 — no dispatch pass after a decline | 1: the SMS-answer test |
 | M27 — a dead push token is kept | 1: the push test |
+| M28 — offers accepted on incidents not on the map | 1: the offer test |
+| M29 — public offers allowed once a volunteer has it | 2: the open-to-anyone and take tests |
+| M30 — a volunteer can take an incident someone was already asked to do | 1 after the test also required that nothing is created (first run: missed, because the "two at once" safeguard still refused it) |
+| M31 — a merge leaves offers on the closed incident | 1: the merge/clean-up test |
+| M32 — the public task shows even when not opened | 2: the BR-172 unit test and the open-to-anyone test |
+| M33 — Whisper's neighbour mix-ups are not corrected (Urdu stays Urdu) | 2: the BR-12 unit test and the Urdu routing test |
+| M34 — the app's language is ignored | 1: the BR-12 unit test |
+| M35 — English goes to Whisper, not Parakeet | 2: the BR-12 unit test and the English routing test |
+| M36 — no Whisper fallback when the chosen engine fails | 1: the fallback test |
+| M37 — no Whisper translate pass when the AI can't translate | 2: the translate-fallback and other-language tests |
+| M38 — the pipeline drops the app's language | 1: the voice-note API test |
+| M39 — any language is accepted | 1: the validation test |
+| M40 — the app's language is not stored | 1: the voice-note API test |
+| M41 — a translation identical to the original is kept | 1: the BR-12 unit test |
+| M42 — language detection decodes the whole voice note (no quick mode) | 6 of the 8 routing tests |
+| M43 — the local AI is asked to translate any language | 1: the other-language test |
 
-Result: **27 of 27 breaks caught** (M23 on the second run). Apart from M7's knock-on failures, only the intended tests failed each time.
+Result: **43 of 43 breaks caught** (M23 and M30 on the second run). M33–M43 (2026-10-01) were run with the full suite by a script that restores each file; the suite then passed 151/151. Apart from M7's knock-on failures, only the intended tests failed each time.
 M17–M21 (2026-09-30) were run with the full suite by a script that restores each file afterwards; the suite passed 114/114 after the last restore. M14–M16 (2026-09-30) were checked with the volunteer-registration group only (`vitest run tests/integration -t "Volunteer registration"`); the restored files were compared byte-for-byte with the backups.
 
 ---
@@ -246,6 +285,7 @@ M17–M21 (2026-09-30) were run with the full suite by a script that restores ea
 | Volunteer registration screens in a real browser (2026-09-30) | Headless Chrome, real frontend, stand-in API on a spare port. Phone size (390 px): filled the form, attached an ID photo, sent. Laptop: `/admin/volunteers` | Form sent the expected fields (no GPS, area "Anna Nagar", JPEG proof) and showed "Application received"; no sideways scrolling. Admin page showed "Waiting for review (2)" with proof photos, and the Volunteers tab listed 2 volunteers with a WhatsApp link for the one with a phone |
 | "Send by SMS" in the Android app (2026-09-30) | Test build of the app with `VITE_SMS_NUMBER` = the emulator's own number, Android 14 emulator (headless), Wi-Fi and mobile data off, GPS set to Chennai | Report saved offline → the S03 card showed "Send by SMS" and "To +15555215554" → the tap opened Google Messages addressed to that number with the packed report; sent. The SMS store held `HG1 KGA5UP 6610 / G 13.08270 80.27070 / N RM / T Water entering our house. Grandmother cannot walk`, and `parseSmsReport` read that exact text back correctly. Seen: Android's WebView said "online" with no network, so the SMS button and the form hint no longer depend on that. Not tested: the emulator doesn't deliver SMS to itself, so the gateway leg was not run on a device; iPhone's `sms:` link |
 | Real SMS through a real gateway phone (2026-09-30) | Xiaomi 23122PCD1I (Android, HyperOS) with SMS Gateway for Android v1.76.0 on USB (`npm run sms:connect -- --usb`), the real server (`npm start`, local AI) and the real Supabase database; an SMS from an iPhone over the carrier network | "Water entering our house near the temple" → report `W2HDRF` (channel SMS, sender verified) → AI → incident `WY8D7`: FLOOD, MEDIUM (31), danger, Evacuation, place "near the temple" → the reply SMS was accepted and sent by the gateway (`ACTION_SENT`, OK). Problems found and fixed on the way: the app had no SMS permission (Android "restricted setting" for apps not from the Play Store; fixed on the phone); the Signing Key didn't match (401) — now set automatically by `sms:connect` through the app's `PATCH /settings`; the gateway retried the 401s and delivered once the key matched. Not tested yet: a packed "Send by SMS" message from the app on a real phone, and the later upload joining it on the real database |
+| Community help screens (2026-10-01) | Headless Chrome 154 at 390 px, the built site, a stand-in API with two verified hazards (one opened to anyone) | List view → hazard card with "Can you help?" and "Offer help" → form filled (name, phone, Boat, note) → "Thank you! A coordinator will call you…"; the opened hazard showed its task and "Join to help" → joined with the remembered name and phone. The stand-in API received both with the right fields. Found and fixed: the card didn't open in list view. Not tested: the volunteer "take" button in a browser (covered by API tests) |
 | Vite dev proxy adds no forwarding headers | Echo server on :3000 behind the Vite proxy | No `X-Forwarded-For`/`CF-Connecting-IP`/`Forwarded`, so the DEV "Reset demo data" button still works |
 
 ---

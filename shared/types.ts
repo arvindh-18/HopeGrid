@@ -44,6 +44,24 @@ export interface DispatchState { settings: DispatchSettings; waiting: number; pe
 /** A volunteer's SMS answer to an SOS (BR-163). */
 export interface VolunteerReply { answer: 'ACCEPT' | 'DECLINE'; code: string | null }
 
+/** F29 community help: what a person offering help can bring. */
+export const HELP_KINDS = ['HANDS', 'VEHICLE', 'BOAT', 'FIRST_AID', 'FOOD_WATER', 'SHELTER', 'OTHER'] as const;
+export type HelpKind = (typeof HELP_KINDS)[number];
+
+/** Languages the app is in, and speech recognition is tuned for (BR-12). */
+export const SPEECH_LANGS = ['en', 'ta', 'hi'] as const;
+export type SpeechLang = (typeof SPEECH_LANGS)[number];
+/** PENDING/ACCEPTED/DECLINED: an offer a coordinator reviews. JOINED: joined an incident opened to anyone. */
+export type HelpOfferStatus = 'PENDING' | 'ACCEPTED' | 'DECLINED' | 'JOINED';
+/** POST /api/public/incidents/:code/help */
+export interface HelpOfferInput { name: string; phone: string; kinds: HelpKind[]; note: string | null; deviceId: string }
+export interface HelpOfferResult { ok: true; status: 'PENDING' | 'JOINED'; task: string | null }
+/** Coordinator view of an offer (staff-only: includes the phone number). */
+export interface HelpOffer {
+  id: string; name: string; phone: string; kinds: HelpKind[]; note: string | null; status: HelpOfferStatus;
+  createdAt: string; reviewedAt: string | null;
+}
+
 export const UNABLE_REASONS = ['NO_ACCESS', 'MISSING_EQUIPMENT', 'UNSAFE', 'PERSONAL', 'TOO_FAR', 'OTHER'] as const;
 export type UnableReason = (typeof UNABLE_REASONS)[number];
 
@@ -100,6 +118,8 @@ export interface ReportSubmission {
   audioBase64: string | null;
   audioMime: string | null;
   audioSeconds: number | null;
+  /** The language the person used the app in: a hint for speech recognition (BR-12). Missing from older apps. */
+  language?: SpeechLang | null;
   createdAt: string;
 }
 
@@ -157,6 +177,11 @@ export interface PublicIncident {
   reportCount: number;
   status: PublicStatus;
   advice: string;
+  /** F29: a volunteer has accepted it (IN_PROGRESS). */
+  helpArranged: boolean;
+  /** F29: a coordinator opened it to anyone; `task` says what to do and where to meet. */
+  openToAll: boolean;
+  task: string | null;
   updatedAt: string;
 }
 
@@ -178,6 +203,8 @@ export interface IncidentListItem {
   reportCount: number;
   hasVoice: boolean;
   viaSms: boolean;
+  /** F29: help offers waiting for a coordinator. */
+  pendingHelpOffers: number;
   possibleDuplicateCode: string | null;
   needsReassign: boolean;
   readyToResolve: boolean;
@@ -250,6 +277,9 @@ export interface IncidentDetail extends IncidentListItem {
   allocations: { id: string; resourceName: string; quantity: number; unit: string; createdAt: string }[];
   logs: { at: string; text: string; public: boolean }[];
   chats: ChatThread[];
+  openToAll: boolean;
+  publicTask: string | null;
+  helpOffers: HelpOffer[];
 }
 
 export interface IncidentPatch {
@@ -380,7 +410,12 @@ export interface IncidentRecord {
   priorityScore: number; priority: PriorityLevel; priorityReasons: Reason[]; priorityOverride: PriorityLevel | null;
   overrideReason: string | null; escalationRecommended: boolean; escalationReasons: Reason[]; escalatedAt: string | null;
   verifiedAt: string | null; onSiteAt: string | null; resolvedAt: string | null; rejectReason: string | null;
-  possibleDuplicateOf: string | null; mergedInto: string | null; autoDispatchedAt: string | null; createdAt: string; updatedAt: string;
+  possibleDuplicateOf: string | null; mergedInto: string | null; autoDispatchedAt: string | null;
+  openToAll: boolean; publicTask: string | null; createdAt: string; updatedAt: string;
+}
+export interface HelpOfferRecord {
+  id: string; incidentId: string; name: string; phone: string; kinds: HelpKind[]; note: string | null; status: HelpOfferStatus;
+  deviceId: string; createdAt: string; reviewedAt: string | null;
 }
 export interface ReportRecord {
   id: string; code: string; pin: string; deviceId: string; incidentId: string | null; text: string;
@@ -388,7 +423,7 @@ export interface ReportRecord {
   locationText: string | null; people: number | null; needs: Need[]; phone: string | null; phoneVerified: boolean;
   photoPath: string | null; audioPath: string | null; audioSeconds: number | null;
   extraction: Extraction | null; aiSource: AiSource | null; processingStatus: ProcessingStatus;
-  channel: ReportChannel; pendingMedia: PendingMedia[]; completedAt: string | null;
+  channel: ReportChannel; pendingMedia: PendingMedia[]; completedAt: string | null; appLanguage: SpeechLang | null;
   createdAt: string; receivedAt: string;
 }
 export interface AssignmentRecord {

@@ -48,6 +48,7 @@ export function submissionToReportRow(
     photoPath: media.photoPath,
     audioPath: media.audioPath,
     audioSeconds: sub.audioSeconds,
+    appLanguage: sub.language ?? null,
     processingStatus: 'PENDING',
     createdAt: sub.createdAt,
   };

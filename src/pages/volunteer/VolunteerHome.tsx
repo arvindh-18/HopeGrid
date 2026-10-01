@@ -143,6 +143,9 @@ export default function VolunteerHome() {
               <section className="card card-pad">
                 <h2 className="t-title-sm">No active requests</h2>
                 <p className="mt-1 t-body-sm text-muted">{p.availability === 'OFFLINE' ? 'You are marked as not available.' : 'New requests appear here automatically. Keep this page open.'}</p>
+                {p.availability === 'AVAILABLE' && (
+                  <Link to="/map" className="btn btn-outline btn-sm mt-3">Find hazards that need help on the map</Link>
+                )}
               </section>
             )}
 

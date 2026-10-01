@@ -53,6 +53,8 @@ create table if not exists incidents (
   possible_duplicate_of  uuid references incidents (id),
   merged_into            uuid references incidents (id),
   auto_dispatched_at     timestamptz,             -- F28: first auto-dispatch; keeps it off the public map until verified or on site
+  open_to_all            boolean not null default false, -- F29: a coordinator lets anyone join directly from the map
+  public_task            text,                    -- F29: what helpers should do and where to meet (shown publicly)
   created_at             timestamptz not null default now(),
   updated_at             timestamptz not null default now()
 );
@@ -83,6 +85,7 @@ create table if not exists reports (
   channel           text not null default 'APP',    -- APP | SMS (F27: arrived through the SMS gateway phone)
   pending_media     text[] not null default '{}',   -- SMS reports: PHOTO / AUDIO still on the phone (BR-07)
   completed_at      timestamptz,                    -- SMS reports: when the full report arrived from the app (BR-07)
+  app_language      text,                           -- en | ta | hi: the app's language, a hint for speech recognition (BR-12)
   created_at        timestamptz not null,           -- time on the phone
   received_at       timestamptz not null default now()
 );
@@ -90,6 +93,8 @@ create table if not exists reports (
 alter table reports add column if not exists channel text not null default 'APP';
 alter table reports add column if not exists pending_media text[] not null default '{}';
 alter table reports add column if not exists completed_at timestamptz;
+-- Databases created before the speech upgrade (BR-12): the app's language. Safe to run again.
+alter table reports add column if not exists app_language text;
 create index if not exists reports_incident_id_idx on reports (incident_id);
 create index if not exists reports_processing_status_idx on reports (processing_status);
 create index if not exists reports_phone_idx on reports (phone); -- follow-up SMS from the same number (BR-06)
@@ -176,6 +181,24 @@ create table if not exists volunteer_applications (
 );
 create index if not exists volunteer_applications_status_idx on volunteer_applications (status);
 
+-- F29 community help: offers from anyone who sees the incident on the public map. Phone numbers: coordinators only.
+create table if not exists help_offers (
+  id          uuid primary key default gen_random_uuid(),
+  incident_id uuid not null references incidents (id),
+  name        text not null,
+  phone       text not null,
+  kinds       text[] not null default '{}',        -- HANDS | VEHICLE | BOAT | FIRST_AID | FOOD_WATER | SHELTER | OTHER
+  note        text,
+  status      text not null default 'PENDING',     -- PENDING | ACCEPTED | DECLINED | JOINED
+  device_id   text not null,
+  created_at  timestamptz not null default now(),
+  reviewed_at timestamptz
+);
+create index if not exists help_offers_incident_id_idx on help_offers (incident_id);
+-- Databases created before F29: add its columns. Safe to run again.
+alter table incidents add column if not exists open_to_all boolean not null default false;
+alter table incidents add column if not exists public_task text;
+
 -- F28 auto-dispatch: coordinator settings (one row, key 'dispatch').
 create table if not exists settings (
   key        text primary key,
@@ -199,6 +222,7 @@ alter table allocations   enable row level security;
 alter table incident_logs enable row level security;
 alter table volunteer_applications enable row level security;
 alter table settings      enable row level security;
+alter table help_offers   enable row level security;
 
 -- The server's service-role key must reach these tables through the Data API
 -- (needed when the project does not auto-expose new tables).

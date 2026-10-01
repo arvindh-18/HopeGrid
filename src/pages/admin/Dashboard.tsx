@@ -182,6 +182,7 @@ function Flags({ i, fresh }: { i: IncidentListItem; fresh: boolean }) {
     i.readyToResolve && <Tag key="rr" tone="ok">✓ Ready to resolve</Tag>,
     i.hasVoice && <Tag key="v">🎤 Voice</Tag>,
     i.viaSms && <Tag key="sms" tone="info">✉️ SMS</Tag>,
+    i.pendingHelpOffers > 0 && <Tag key="help" tone="lime">🙋 {i.pendingHelpOffers} {i.pendingHelpOffers === 1 ? 'offer' : 'offers'} of help</Tag>,
   ].filter(Boolean);
   if (flags.length === 0) return <span className="t-caption">—</span>;
   return <div className="flex flex-wrap gap-1.5">{flags}</div>;

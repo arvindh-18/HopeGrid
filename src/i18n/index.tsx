@@ -10,11 +10,10 @@ import { ta } from './ta';
 export type Lang = 'en' | 'ta' | 'hi';
 export type { Key };
 
-/** `speech` is the SpeechRecognition language for live dictation (F24). */
-export const LANGS: { code: Lang; name: string; speech: string }[] = [
-  { code: 'en', name: 'English', speech: 'en-IN' },
-  { code: 'ta', name: 'தமிழ்', speech: 'ta-IN' },
-  { code: 'hi', name: 'हिन्दी', speech: 'hi-IN' },
+export const LANGS: { code: Lang; name: string }[] = [
+  { code: 'en', name: 'English' },
+  { code: 'ta', name: 'தமிழ்' },
+  { code: 'hi', name: 'हिन्दी' },
 ];
 const DICTS: Record<Lang, Record<Key, string>> = { en, ta, hi };
 const STORAGE_KEY = 'hopegrid.lang';

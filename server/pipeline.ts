@@ -167,10 +167,13 @@ export async function changeReport(reportId: string, change: () => Promise<void>
 export async function checkSchema(): Promise<void> {
   const checks = await Promise.all([
     db.from('reports').select('channel, pending_media, completed_at').limit(1), // F27
+    db.from('reports').select('app_language').limit(1), // BR-12 speech hint
     db.from('assignments').select('auto, respond_by').limit(1), // F28
     db.from('incidents').select('auto_dispatched_at').limit(1),
     db.from('profiles').select('push_token').limit(1),
     db.from('settings').select('key').limit(1),
+    db.from('help_offers').select('id').limit(1), // F29
+    db.from('incidents').select('open_to_all, public_task').limit(1),
   ]);
   const missing = checks.map((c) => c.error?.message).filter((m): m is string => !!m && /column|schema cache|relation|does not exist/i.test(m));
   if (missing.length) {
@@ -229,8 +232,8 @@ async function hear(r: ReportRecord): Promise<{ transcript: string | null; forAi
   if (!r.audioPath || r.transcriptStatus !== 'NONE') return { transcript: r.transcript, forAi: r.transcript, status: r.transcriptStatus };
   try {
     // Non-English speech also gets an English translation: staff see both, and the AI reads both — the original
-    // keeps what a poor translation loses.
-    const heard = await transcribe(r.audioPath);
+    // keeps what a poor translation loses. The app's language helps pick the speech engine.
+    const heard = await transcribe(r.audioPath, r.appLanguage ?? null);
     return {
       transcript: heard.english ? `${heard.text}\n\nEnglish: ${heard.english}` : heard.text,
       forAi: heard.english ? `${heard.text}\n(English machine translation, may be inaccurate: ${heard.english})` : heard.text,

@@ -8,9 +8,11 @@ import {
   type VolunteerProfile, type VolunteerProfilePatch,
 } from '../../shared/types';
 import { currentUser, loadProfile, requireRole } from '../auth';
-import { applyVolunteerStatus } from '../dispatch';
+import { isPublic } from '../../shared/publicView';
+import { isEligible } from '../../shared/volunteerMatch';
+import { applyVolunteerStatus, createAssignment } from '../dispatch';
 import { fromRows, toRow } from '../mappers';
-import { getIncident, reportsOf } from '../pipeline';
+import { addLog, allAssignments, endAssignment, getIncident, reportsOf } from '../pipeline';
 import { openStream } from '../events';
 import { db } from '../supabase';
 import { ownAssignment } from './messages';
@@ -113,6 +115,37 @@ volunteerRouter.get('/assignments', async (req, res) => {
   const active = mine.filter((a) => ACTIVE_ASSIGNMENT.includes(a.status));
   const finished = mine.filter((a) => !ACTIVE_ASSIGNMENT.includes(a.status)).slice(0, RECENT_FINISHED);
   res.json(await Promise.all([...active, ...finished].map((a) => toVolunteerAssignment(a))));
+});
+
+// POST /api/volunteer/incidents/:code/take — an approved volunteer takes a hazard from the public map that nobody has
+// yet (F29, BR-174): it becomes their accepted assignment at once.
+volunteerRouter.post('/incidents/:code/take', async (req, res) => {
+  const user = currentUser(req);
+  const { data, error } = await db.from('incidents').select('*').eq('code', String(req.params.code).toUpperCase()).maybeSingle();
+  if (error) throw new Error(`Incident lookup failed: ${error.message}`);
+  const i = data ? fromRows<IncidentRecord>([data])[0] : null;
+  const { data: reps } = i ? await db.from('reports').select('id').eq('incident_id', i.id) : { data: [] };
+  if (!i || !isPublic({ ...i, effectivePriority: effectivePriority(i.priority, i.priorityOverride), reportCount: reps?.length ?? 0 })) {
+    throw new ApiError('NOT_FOUND', 'This incident is not on the safety map.');
+  }
+  if (i.status !== 'VERIFIED') throw new ApiError('INVALID_STATE', 'Someone is already helping here, or it is closed.');
+  const [all, v] = await Promise.all([allAssignments(), me(user.id)]);
+  if (all.some((a) => a.incidentId === i.id && ACTIVE_ASSIGNMENT.includes(a.status))) {
+    throw new ApiError('INVALID_STATE', 'A volunteer has already been asked to help here.');
+  }
+  if (!isEligible(v, i.id, all)) {
+    throw new ApiError('INVALID_STATE', v.availability !== 'AVAILABLE' ? 'Set yourself as available and finish your current assignment first.' : 'You already have an assignment, or declined this one.');
+  }
+  const a = await createAssignment(i, v, null);
+  // Two volunteers tapping at once: the first assignment wins, the other is cancelled.
+  const active = (await allAssignments()).filter((x) => x.incidentId === i.id && ACTIVE_ASSIGNMENT.includes(x.status));
+  if (active[0]?.id !== a.id) {
+    await endAssignment(a, 'CANCELLED', 'Someone else took it first');
+    throw new ApiError('INVALID_STATE', 'Someone else took this a moment ago.');
+  }
+  await addLog(i.id, `Volunteer ${v.name} took this incident from the public map`, false);
+  await applyVolunteerStatus(a, v, 'ACCEPTED', null);
+  res.json(await toVolunteerAssignment(await ownAssignment(a.id, user.id)));
 });
 
 // POST /api/volunteer/push-token {token: string | null} — the app's Firebase push address, or null to stop (F28)

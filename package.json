@@ -20,11 +20,12 @@
     "sms:connect": "tsx server/scripts/sms-connect.ts",
     "preview": "vite preview",
     "seed": "tsx server/scripts/seed.ts",
-    "typecheck": "tsc --noEmit && tsc --noEmit --strict --target es2022 --module esnext --moduleResolution bundler --skipLibCheck --types node server/index.ts server/scripts/cleanup.ts eval/run.ts eval/bench.ts eval/prompt-experiment.ts eval/diagnose-type-bias.ts",
+    "typecheck": "tsc --noEmit && tsc --noEmit --strict --target es2022 --module esnext --moduleResolution bundler --skipLibCheck --types node server/index.ts server/scripts/cleanup.ts eval/run.ts eval/bench.ts eval/prompt-experiment.ts eval/diagnose-type-bias.ts eval/asr.ts",
     "test": "vitest run",
     "setup-ai": "tsx server/scripts/setup-models.ts",
     "eval": "tsx eval/run.ts",
     "bench": "tsx eval/bench.ts",
+    "eval:asr": "tsx eval/asr.ts",
     "cleanup": "tsx server/scripts/cleanup.ts"
   },
   "dependencies": {
@@ -44,7 +45,8 @@
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-leaflet": "^5.0.0",
-    "react-router-dom": "^7.18.4"
+    "react-router-dom": "^7.18.4",
+    "sherpa-onnx-node": "^1.13.8"
   },
   "devDependencies": {
     "@capacitor/cli": "^6.2.2",

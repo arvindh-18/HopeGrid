@@ -16,6 +16,9 @@ export interface PublicSourceIncident {
   /** F28: set when auto-dispatch sent a volunteer; no coordinator has looked at it yet. */
   autoDispatchedAt?: string | null;
   onSiteAt?: string | null;
+  /** F29: opened to anyone by a coordinator, with the task shown publicly. */
+  openToAll?: boolean;
+  publicTask?: string | null;
   confidence: number;
   effectivePriority: PriorityLevel;
   reportCount: number;
@@ -89,6 +92,9 @@ export function toPublicIncident(i: PublicSourceIncident): PublicIncident {
     reportCount: i.reportCount,
     status,
     advice: adviceFor(i.type, status),
+    helpArranged: i.status === 'IN_PROGRESS', // BR-171: a volunteer accepted it
+    openToAll: !!i.openToAll && status !== 'RESOLVED',
+    task: i.openToAll && status !== 'RESOLVED' ? i.publicTask ?? null : null, // written by a coordinator for the public
     updatedAt: i.updatedAt,
   };
 }

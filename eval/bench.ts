@@ -47,14 +47,27 @@ async function main() {
     result.llamaGpu = `unknown (${e instanceof Error ? e.message : e})`;
   }
 
+  // The AI model is loaded (and timed) first: speech now uses it for the English version of Tamil and Hindi (BR-12).
+  const ai = await import('../server/ai');
+  let aiLoadMs = 0;
+  let aiError: unknown = null;
+  try {
+    const t = performance.now();
+    await ai.loadAiModel();
+    aiLoadMs = ms(t);
+  } catch (e) {
+    aiError = e;
+  }
+
   // ---- speech-to-text
   const speech: Record<string, unknown>[] = [];
   const canSay = os.platform() === 'darwin';
-  const { loadWhisper, transcribeAudio } = await import('../server/transcribe');
+  const { loadSpeechModels, transcribeAudio } = await import('../server/transcribe');
   let whisperLoadMs: number | null = null;
+  let loaded = '';
   try {
     const t = performance.now();
-    await loadWhisper();
+    loaded = await loadSpeechModels(); // every installed engine (BR-12), as at server start
     whisperLoadMs = ms(t);
   } catch (e) {
     result.speech = { skipped: `speech model not available: ${e instanceof Error ? e.message : e}` };
@@ -78,16 +91,14 @@ async function main() {
       speech.push({ clip: c.id, lang: c.lang, voice: c.voice, audioSeconds: +seconds.toFixed(1), msPerRun: times, medianMs: median(times), output: last });
       console.log(`speech ${c.id} (${c.lang}, ${seconds.toFixed(1)} s audio): median ${median(times)} ms over ${RUNS} runs ${JSON.stringify(times)}`);
     }
-    result.speech = { modelLoadMs: whisperLoadMs, clips: speech };
-    console.log(`speech model load: ${whisperLoadMs} ms`);
+    result.speech = { modelLoadMs: whisperLoadMs, models: loaded, clips: speech };
+    console.log(`speech models load: ${whisperLoadMs} ms (${loaded})`);
   }
 
   // ---- AI structuring (same function the pipeline calls; falls back to keywords on error/timeout)
-  const ai = await import('../server/ai');
   try {
-    const t = performance.now();
-    await ai.loadAiModel();
-    const loadMs = ms(t);
+    if (aiError) throw aiError;
+    const loadMs = aiLoadMs;
     const rows: Record<string, unknown>[] = [];
     for (const c of CLIPS) {
       const text = reports.find((r) => r.id === c.id)!.text;

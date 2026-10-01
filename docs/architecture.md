@@ -39,13 +39,16 @@ Admin accounts are created by the seed script or by hand (Supabase Auth user + `
                                 │ HTTPS (cloudflared/ngrok tunnel to laptop)
 ┌───────────────────────────────▼──────────────── Express server (laptop) ─────┐
 │ routes → shared rules (/shared) → Supabase client (service role)             │
-│ pipeline.ts: transcribe (Whisper) → structure (local LLM | keywords) → incident │
+│ pipeline.ts: transcribe (speech) → structure (local LLM | keywords) → incident  │
 │              → duplicate check → scores                                      │
 │ Serves built frontend (dist/) in demo mode                                   │
 └───────┬───────────────────────┬──────────────────────────┬───────────────────┘
         │                       │                          │
-   Supabase (cloud)        LLM (in-process)          whisper.cpp + ffmpeg (in-process)
-   - Postgres tables       - Qwen2.5 3B GGUF         - ggml-small model
+   Supabase (cloud)        LLM (in-process)          speech + ffmpeg (in-process)
+   - Postgres tables       - Qwen2.5 3B GGUF         - whisper.cpp ggml-small
+                           - also translates         - Parakeet (English)
+                             Tamil/Hindi speech      - IndicConformer ta + hi
+                                                       (sherpa-onnx)
    - Storage bucket "media" (private)
    - Auth (staff only)
 ```
@@ -64,7 +67,7 @@ Admin accounts are created by the seed script or by hand (Supabase Auth user + `
 | D8 | Supabase Auth for staff login, called by the server (`/api/auth/login`). Server verifies bearer token on each request. | Real auth with no custom password handling. |
 | D9 | Report processing runs inside the server process after responding (not awaited). On server start, all `PENDING` reports are processed. | No queue infrastructure; nothing lost on restart. |
 | D10 | Local LLM inside the server via `node-llama-cpp` (Qwen2.5 3B Instruct, GGUF Q4_K_M) with JSON-schema grammar, temperature 0. Fallback: keyword extractor in `shared/`. | "Local AI"; demo never stalls. |
-| D11 | whisper.cpp inside the server via `@fugood/whisper.node` (prebuilt, language auto-detect) + ffmpeg from `@ffmpeg-installer/ffmpeg`. Models download into `models/` only with `npm run setup-ai` (server laptop); without them the server falls back per BR-11/BR-12. | Local, multilingual (Tamil + English), works on recorded audio. |
+| D11 | Speech inside the server, routed by language (BR-12, 2026-10-01): whisper.cpp via `@fugood/whisper.node` guesses the language and hears other languages (and is the fallback); NVIDIA Parakeet TDT 0.6B v3 (CC-BY-4.0, same package) hears English; AI4Bharat IndicConformer (MIT; NeMo CTC, int8) via `sherpa-onnx-node` hears Tamil and Hindi; the local LLM writes the English version. ffmpeg from `@ffmpeg-installer/ffmpeg`. Models download into `models/` only with `npm run setup-ai` (server laptop), pinned and checksum-checked; without them the server falls back per BR-11/BR-12. | Local and offline. On real recordings IndicConformer made about half (Tamil) and a seventh (Hindi) of Whisper small's character errors, and Parakeet fewer than Whisper small for English (as few as Whisper turbo, at a tenth of its time; docs/evaluation.md §5b); Whisper alone was weak for Tamil. |
 | D12 | Polling, plus Server-Sent Events **change signals** (2026-09-29). Staff and victim screens open one stream (`/api/admin/events`, `/api/volunteer/events`, `POST /api/track/events`) that only says which incident changed (victims: that *their* report changed, with no ids). The screen then refetches through its normal API call, at most once per its polling interval. While the stream is live it polls only every `POLL_FALLBACK_MS`; without it, it polls as before. Intervals in `shared/constants.ts`. | Updates appear at once and idle polling drops ~6×. No data or new privacy surface on the stream, and still works when streams don't (proxies, errors). |
 | D13 | Leaflet + OpenStreetMap tiles; list view fallback. | Free, no API key. |
 | D14 | Media and all request bodies are JSON with base64 media (no multipart). | One code path for online and offline (outbox stores JSON). |
@@ -76,7 +79,7 @@ Admin accounts are created by the seed script or by hand (Supabase Auth user + `
 ## 4. Tech stack and allowed libraries
 
 **Frontend:** react, react-dom, react-router-dom, vite, @vitejs/plugin-react, vite-plugin-pwa, tailwindcss, @tailwindcss/vite, leaflet, react-leaflet, idb-keyval.
-**Backend:** express, @supabase/supabase-js, tsx (run TS), dotenv, node-llama-cpp, @fugood/whisper.node, @ffmpeg-installer/ffmpeg.
+**Backend:** express, @supabase/supabase-js, tsx (run TS), dotenv, node-llama-cpp, @fugood/whisper.node, sherpa-onnx-node, @ffmpeg-installer/ffmpeg.
 **Tooling:** typescript, concurrently, vitest.
 **Tunnel:** cloudflared (npm package, `npm run tunnel`). Nothing else is installed outside npm; Node.js 22.12+ is the only prerequisite.
 
@@ -120,7 +123,9 @@ hopegrid/
 │   ├── publicView.ts
 │   ├── trackingStatus.ts
 │   ├── sms.ts                    (F27 SMS format)
-│   └── dispatch.ts               (F28 auto-dispatch rules)
+│   ├── dispatch.ts               (F28 auto-dispatch rules)
+│   ├── communityHelp.ts          (F29 offers, join, take)
+│   └── speech.ts                 (BR-12 which speech engine)
 ├── server/
 │   ├── index.ts
 │   ├── supabase.ts
@@ -128,7 +133,8 @@ hopegrid/
 │   ├── mappers.ts
 │   ├── storage.ts
 │   ├── ai.ts
-│   ├── transcribe.ts
+│   ├── transcribe.ts             (speech: IndicConformer, Parakeet, Whisper)
+│   ├── sherpa-onnx-node.d.ts     (types for the IndicConformer runtime)
 │   ├── pipeline.ts
 │   ├── events.ts                 (live change signals, D12)
 │   ├── dispatch.ts               (F28 auto-dispatch + shared assignment steps)
@@ -162,8 +168,7 @@ hopegrid/
 │   │   └── useOnline.ts
 │   ├── hooks/
 │   │   ├── usePoll.ts
-│   │   ├── useAuth.tsx
-│   │   └── useLiveDictation.ts
+│   │   └── useAuth.tsx
 │   ├── i18n/                     (F25: en.ts, ta.ts, hi.ts, index.tsx)
 │   ├── lib/
 │   │   ├── codes.ts
@@ -232,6 +237,8 @@ hopegrid/
 | publicView.ts | `isPublic`, `toPublicIncident`, `adviceFor`, `markerColor`. | BR-80…BR-84 |
 | trackingStatus.ts | `victimStep` (internal state → victim step). | BR-90 |
 | sms.ts | `encodeSmsReport` (phone) and `parseSmsReport` (server): the one-SMS report format. | BR-06 |
+| communityHelp.ts | `checkHelpOffer`, `checkPublicTask`, `helpOptions` (who may take, offer or join). | BR-170…BR-172 |
+| speech.ts | `speechLanguage` (Whisper's guess + the app's language → language), `speechEngine`, `isSpeechLang`, `cleanTranslation`. | BR-12 |
 | dispatch.ts | `checkDispatchSettings`, `waitingIncidents`, `incidentsToDispatch`, `expiredOffers`, `parseVolunteerReply`, `sosSummary`/`sosSms`/`sosPush`. | BR-160…BR-164 |
 
 **server/**
@@ -243,8 +250,8 @@ hopegrid/
 | auth.ts | Middleware `requireRole(role)`: reads `Authorization: Bearer <token>`, `db.auth.getUser(token)`, loads `profiles` row, attaches `req.user = {id, name, role}`; 401/403 otherwise. |
 | mappers.ts | DB row ↔ API object conversion (snake_case ↔ camelCase). Only place this happens. |
 | storage.ts | `uploadBase64(path, base64, mime)`, `signedUrl(path)` (1 hour). |
-| ai.ts | `structureText(text): Promise<{extraction, source}>` — local LLM call (node-llama-cpp) (timeout 30 s, JSON schema of `Extraction`), validate/coerce (BR-11), on any failure use `keywordExtractor` and `source = KEYWORDS`. |
-| transcribe.ts | `transcribe(storagePath): Promise<{text, language, english}>` — download audio, ffmpeg → 16 kHz mono PCM, whisper.cpp in-process (language auto); non-English speech also translated to English (BR-12). Timeout 60 s. Throws on failure. |
+| ai.ts | `structureText(text): Promise<{extraction, source}>` — local LLM call (node-llama-cpp) (timeout 30 s, JSON schema of `Extraction`), validate/coerce (BR-11), on any failure use `keywordExtractor` and `source = KEYWORDS`. `translateToEnglish(text, 'ta' \| 'hi')` — English version of a voice-note transcript on its own small context (BR-12). |
+| transcribe.ts | `transcribe(storagePath, appLanguage): Promise<{text, language, english, engine}>` — download audio, ffmpeg → 16 kHz mono PCM; Whisper guesses the language; Tamil and Hindi go to IndicConformer, English to Parakeet, the rest to Whisper told the language (Whisper also takes over when an engine fails); non-English speech also gets an English version (`ai.translateToEnglish`, else Whisper's translate pass) (BR-12). One voice note at a time. Timeout 60 s. Throws on failure. `loadSpeechModels()` warms every installed model at start. |
 | pipeline.ts | `processReport(reportId)`, `recomputeIncident(incidentId)`, `processPendingReports()`, `changeReport(id, change)` (BR-07: change a stored report only while it is not being processed, then queue it again), `checkSchema()` (startup warning when schema.sql needs re-running). Implements §11.2. |
 | routes/victim.ts | `/api/reports` (also completes a report that came by SMS, BR-07), `/api/track`, `/api/track/verify-phone`. |
 | dispatch.ts | F28: dispatch settings; `createAssignment` and `applyVolunteerStatus` (BR-100…BR-104, used by coordinators, volunteers and SMS answers); `answerBySms` (BR-163); `runDispatch` (expire deadlines, send SOS offers) and `startDispatcher` (every DISPATCH_TICK_MS). |
@@ -275,7 +282,6 @@ hopegrid/
 | offline/useOnline.ts | `navigator.onLine` + events. |
 | hooks/usePoll.ts | `usePoll(fn, intervalMs, deps?, enabled?, watch?)` → `{data, error, loading, refresh}`. With `watch` (a live change signal): refresh on a signal (at most once per `intervalMs`); poll only every `POLL_FALLBACK_MS` while the stream is live. |
 | hooks/useAuth.tsx | Auth context: `{user, token, login, logout}`; token in sessionStorage. |
-| hooks/useLiveDictation.ts | Optional (F24): browser SpeechRecognition wrapper. |
 | i18n/index.tsx | F25: `LanguageProvider`, `useI18n()` → `{t, rich, server, ago, type, need, advice…}`, `LanguagePicker`, `EnglishOnly` (staff screens). Keys in `en.ts`; `ta.ts`/`hi.ts` must cover every key (type-checked). |
 | lib/codes.ts | `newReportCode()`, `newPin()`, `newUuid()` using `crypto`. |
 | lib/media.ts | `compressImage(file) → base64 jpeg` (max 1280 px, quality 0.7); `blobToBase64`. |
@@ -397,6 +403,11 @@ Conventions: `id uuid primary key default gen_random_uuid()` unless stated; `cre
 | channel | text | no | `APP` \| `SMS` (F27), default APP |
 | pending_media | text[] | no | SMS reports: `PHOTO` / `AUDIO` still on the phone (BR-07) |
 | completed_at | timestamptz | yes | SMS reports: when the phone's full upload arrived (BR-07) |
+| app_language | text | yes | `en` \| `ta` \| `hi`: the app's language, a hint for speech recognition (BR-12) |
+
+F29 adds: `incidents.open_to_all` (boolean, default false) and `incidents.public_task` (text, shown publicly), and a
+`help_offers` table (`incident_id` FK, `name`, `phone` (coordinators only), `kinds` text[], `note`, `status`
+PENDING | ACCEPTED | DECLINED | JOINED, `device_id`, `created_at`, `reviewed_at`).
 
 F28 adds: `assignments.auto` (boolean, default false) and `assignments.respond_by` (timestamptz), `incidents.auto_dispatched_at`
 (timestamptz), `profiles.push_token` (text), and a `settings` table (`key` text PK, `value` jsonb, `updated_at`) holding
@@ -541,7 +552,7 @@ ReportSubmission = { id: uuid, code: string, pin: string, deviceId: string,
   text: string, lat: number|null, lng: number|null, locationText: string|null,
   people: number|null, needs: Need[], phone: string|null,
   photoBase64: string|null, audioBase64: string|null, audioMime: string|null,
-  audioSeconds: number|null, createdAt: ISOString }
+  audioSeconds: number|null, language?: 'en'|'ta'|'hi'|null, createdAt: ISOString }
 
 TrackView = { code, step: VictimStep, updatedAt, messages: {at, text}[],   // public logs
   phoneVerified: boolean, chatOpen: boolean }
@@ -552,6 +563,18 @@ TrackView = { code, step: VictimStep, updatedAt, messages: {at, text}[],   // pu
 | Method | Path | Request | Response |
 |---|---|---|---|
 | POST | /sms/incoming | SMS Gateway for Android webhook `{event: "sms:received", payload: {message, sender, messageId, receivedAt}}` signed with `X-Signature` + `X-Timestamp`, or `{from, text}` with `Authorization: Bearer <SMS_WEBHOOK_SECRET>` | `{ok:true, outcome: SmsOutcome, code?}` (CREATED \| ADDED \| ALREADY_RECEIVED \| IGNORED); 401 wrong signature/secret; 404 while `SMS_WEBHOOK_SECRET` is empty; 500 (retry) while the report is being processed |
+
+**Community help** (F29)
+
+| Method | Path | Request | Response |
+|---|---|---|---|
+| POST | /public/incidents/:code/help | `HelpOfferInput` `{name, phone, kinds, note, deviceId}` (no login) | 201/200 `{ok, status: PENDING \| JOINED, task}`; 404 not on the map; 409 a volunteer has it / resolved |
+| POST | /volunteer/incidents/:code/take | — | `VolunteerAssignment` (ACCEPTED); 404 / 409 |
+| POST | /admin/incidents/:id/open | `{open, task?}` | `IncidentDetail`; 409 not on the map; 400 task |
+| POST | /admin/help-offers/:id/accept · /decline | — | `IncidentDetail`; 409 already answered |
+
+`PublicIncident` also carries `helpArranged`, `openToAll`, `task`; `IncidentListItem` `pendingHelpOffers`;
+`IncidentDetail` `openToAll`, `publicTask`, `helpOffers[]`.
 
 **Auto-dispatch** (F28)
 
@@ -769,7 +792,7 @@ POST /reports:
   → processReport(id)  (not awaited)
 
 processReport(id):
-  1. if audio: transcript = transcribe(audio_path) → DONE | FAILED (BR-12)
+  1. if audio: transcript = transcribe(audio_path, app_language) → DONE | FAILED (BR-12)
   2. description = text + "\n" + transcript
   3. {extraction, source} = ai.structureText(description)       (BR-10, BR-11)
   4. apply victim form values over AI values (BR-13)
@@ -836,7 +859,7 @@ The demo flood incident is **not** seeded; it is created live during the demo.
 | 0–2 | A. Foundation | Repo, all files created as empty stubs, `shared/types.ts` + `constants.ts` complete, `App.tsx` routes, `data/index.ts` Api interface, Supabase schema + seed, local LLM + Whisper tested, HTTPS tunnel tested on a phone | Lead + Backend |
 | 2–8 | B. UI | Every screen built against the `Api` interface; all `shared/` rule functions + tests | Everyone |
 | 8–15 | C. Real backend | All server routes + pipeline (keywords path first, then the local LLM, then Whisper); replace `realApi.ts` stubs with fetch calls | Backend, Lead |
-| 15–18 | D. Secondary | Escalation, resources, fake OTP, nearby banner, live dictation | Assigned owners |
+| 15–18 | D. Secondary | Escalation, resources, fake OTP, nearby banner, live dictation (removed 2026-10-01) | Assigned owners |
 | 18–21 | E. Testing | Full demo on 2 phones + laptop incl. airplane mode; fix bugs | Everyone |
 | 21–24 | F. Demo prep | Reset works, demo script rehearsed, backup video recorded. **No new features after hour 21.** | Everyone |
 
@@ -859,7 +882,7 @@ The demo flood incident is **not** seeded; it is created live during the demo.
 | Risk | Fallback | Cut order if late |
 |---|---|---|
 | Local LLM slow/bad JSON | Keyword extractor (automatic) | Use keywords only |
-| Whisper slow/inaccurate (Tamil) | `small` model; admin plays audio; keyboard mic | Cut live dictation (F24) |
+| Whisper slow/inaccurate (Tamil) | IndicConformer for Tamil and Hindi (BR-12); admin plays audio; keyboard mic | — |
 | Venue internet down (Supabase is cloud) | Phone hotspot for laptop; backup video | — |
 | GPS/mic blocked | HTTPS tunnel from hour 1; text location field | — |
 | Map tiles fail | List view | — |

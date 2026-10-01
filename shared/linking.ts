@@ -140,6 +140,9 @@ export interface MergeableIncident {
   onSiteAt: string | null;
   priorityOverride: PriorityLevel | null;
   overrideReason: string | null;
+  /** F29: opened to anyone, and the public task (BR-172). */
+  openToAll?: boolean;
+  publicTask?: string | null;
 }
 
 const earliest = (a: string | null, b: string | null) => {
@@ -172,6 +175,9 @@ export function mergeFields(t: MergeableIncident, s: MergeableIncident): Mergeab
     onSiteAt: earliest(t.onSiteAt, s.onSiteAt),
     priorityOverride: t.priorityOverride ?? s.priorityOverride,
     overrideReason: t.priorityOverride ? t.overrideReason : s.overrideReason,
+    // F29: still open to anyone if either was, with the target's task first.
+    openToAll: !!(t.openToAll || s.openToAll),
+    publicTask: (t.openToAll ? t.publicTask : null) ?? (s.openToAll ? s.publicTask : null) ?? null,
   };
 }
 

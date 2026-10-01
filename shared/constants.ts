@@ -41,6 +41,11 @@ export const DISPATCH_MAX_RESPONSE_MINUTES = 30;
 export const DISPATCH_TICK_MS = 15_000;             // how often the server checks answer deadlines and the queue
 export const PUSH_TIMEOUT_MS = 10_000;
 
+// F29 community help (BR-170…BR-174)
+export const HELP_NAME_MAX = 80;
+export const HELP_NOTE_MAX = 300;
+export const PUBLIC_TASK_MAX = 200;
+
 export const OUTBOX_RETRY_MS = 15_000;
 export const POLL_ADMIN_MS = 5_000;
 export const POLL_VOLUNTEER_MS = 5_000;

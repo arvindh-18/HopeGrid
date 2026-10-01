@@ -19,7 +19,7 @@
 
 | | Offline reporting | AI runs locally (no cloud AI service) | Multilingual **voice** reports | Public view private by design | Humans decide (AI never acts) | Cost / self-hosting |
 |---|---|---|---|---|---|---|
-| **HopeGrid** | Yes — phone saves the report and sends it later (outbox), or sends it by SMS with signal but no data (F27, through one gateway phone). | Yes — Qwen 2.5 3B + Whisper run on the **server laptop** (not on the phone) | Yes — Whisper transcription + English translation; quality measured and **weak for Tamil** (docs/evaluation.md) | Yes — only verified incidents, coordinates rounded, no report text (BR-80/81, tested) | Yes — AI only fills fields (AR-20, tested) | Self-hosted on one laptop + a Supabase project. **No licence file yet** (TODO) |
+| **HopeGrid** | Yes — phone saves the report and sends it later (outbox), or sends it by SMS with signal but no data (F27, through one gateway phone). | Yes — Qwen 2.5 3B + Whisper run on the **server laptop** (not on the phone) | Yes — IndicConformer for Tamil and Hindi, Parakeet for English, English version from the local AI; measured on real recordings: Tamil 20.5% and Hindi 5.0% character errors; the **English version of Tamil is still weak** (docs/evaluation.md §5b) | Yes — only verified incidents, coordinates rounded, no report text (BR-80/81, tested) | Yes — AI only fills fields (AR-20, tested) | Self-hosted on one laptop + a Supabase project. **No licence file yet** (TODO) |
 | **Ushahidi** | Yes (mobile apps) | Not verified | Not verified | Not verified | Not verified | Open source (AGPL-3.0), self-hostable; hosted plans not verified |
 | **KoboToolbox** | Yes (KoboCollect, web forms) | Not verified (AI features exist; where they run is not stated) | Audio transcription and translation stated; languages covered not verified | Not verified (a data-collection tool, not a public map) | Not verified | Open source; self-hosting not verified |
 | **Sahana Eden** | Not verified | Not verified | Not verified | Not verified | Not verified | Open source; listed as legacy |
@@ -34,8 +34,9 @@
    this, e.g. data collection (KoboToolbox, Survey123) or crowd mapping (Ushahidi).
 2. **Local AI, no per-request cost or outside AI service.** Transcription and structuring run on the server laptop
    (docs/architecture.md D10–D11). Reports aren't sent to a third-party AI API.
-3. **Built for Indian languages from the start.** Speech in Whisper's 14 Indian-language list is transcribed and
-   translated to English for the AI. Victim screens are in Tamil and Hindi. Keyword fallback covers English, Tamil and
+3. **Built for Indian languages from the start.** Tamil and Hindi speech is heard by AI4Bharat's IndicConformer
+   (built for Indian languages), English by NVIDIA's Parakeet, other languages in Whisper's list by Whisper. Each
+   gets an English version for the AI. Victim screens are in Tamil and Hindi. Keyword fallback covers English, Tamil and
    Hindi.
 4. **Privacy and safety rules are enforced by tests.** The public map shows only coordinator-verified incidents with
    rounded coordinates; chat never shows phone numbers. Both are asserted in `tests/integration/api.test.ts`.

@@ -162,6 +162,7 @@ describe('POST /api/reports — submission (F01, BR-02, BR-03)', () => {
     ['an MP4 file labelled as WebM', { audioBase64: MP4, audioMime: 'audio/webm', audioSeconds: 5 }],
     ['an unsupported audio type', { audioBase64: WEBM, audioMime: 'audio/x-evil', audioSeconds: 5 }],
     ['a voice note longer than 60 s', { audioBase64: WEBM, audioMime: 'audio/webm', audioSeconds: 61 }],
+    ['a language the app does not offer', { language: 'fr' }],
   ])('rejects a report with %s (VALIDATION) and stores nothing', async (_label, over) => {
     const res = await server.call('POST', '/reports', { ...submission(), ...over });
     expect(res.status, res.raw).toBe(400);
@@ -229,10 +230,12 @@ describe('Report processing pipeline (F05, F06, BR-10…BR-13)', () => {
   });
 
   it('transcribes voice notes; non-English speech is kept with an English line and the AI reads both (BR-12)', async () => {
-    speech.result = { text: 'எங்கள் வீட்டில் வெள்ளம் புகுந்துவிட்டது', language: 'ta', english: 'Flood water entered our house' };
+    speech.result = { text: 'எங்கள் வீட்டில் வெள்ளம் புகுந்துவிட்டது', language: 'ta', english: 'Flood water entered our house', engine: 'INDICCONFORMER' };
     llm.answer = { type: 'FLOOD', people: null, vulnerable: false, mobilityIssue: false, trapped: false, medical: false, danger: true, needs: ['EVACUATION'], places: [], summary: 'Flood water entered a house.' };
-    const { sub, report, incident } = await submit(submission({ text: '', audioBase64: WEBM, audioMime: 'audio/webm', audioSeconds: 6 }));
+    const { sub, report, incident } = await submit(submission({ text: '', audioBase64: WEBM, audioMime: 'audio/webm', audioSeconds: 6, language: 'ta' }));
     expect(speech.calls).toEqual([`reports/${sub.id}/audio.webm`]);
+    expect(speech.hints).toEqual(['ta']); // the app's language reaches the speech engine (BR-12)
+    expect(report.app_language).toBe('ta');
     expect(report.transcript_status).toBe('DONE');
     expect(report.transcript).toBe('எங்கள் வீட்டில் வெள்ளம் புகுந்துவிட்டது\n\nEnglish: Flood water entered our house');
     expect(llm.prompts[0]).toContain('எங்கள் வீட்டில் வெள்ளம் புகுந்துவிட்டது');
@@ -243,6 +246,8 @@ describe('Report processing pipeline (F05, F06, BR-10…BR-13)', () => {
   it('keeps going when transcription fails: the incident is still created and staff are told to listen', async () => {
     speech.error = 'whisper crashed';
     const { report, incident } = await submit(submission({ text: 'Help, water rising near the bridge', audioBase64: WEBM, audioMime: 'audio/webm', audioSeconds: 6 }));
+    expect(speech.hints).toEqual([null]); // an older app sends no language: the engine decides alone
+    expect(report.app_language).toBeNull();
     expect(report.transcript_status).toBe('FAILED');
     expect(report.transcript).toBeNull();
     expect(incident.type).toBe('OTHER');
@@ -532,7 +537,7 @@ describe('Chat (F17, BR-70…BR-73)', () => {
 // ------------------------------------------------------------------------------------------------ AR-22 public data
 
 describe('Public and victim endpoints leak no private data (AR-22, BR-80, BR-81)', () => {
-  const PUBLIC_KEYS = ['advice', 'area', 'code', 'color', 'confidenceBand', 'lat', 'lng', 'priority', 'reportCount', 'status', 'type', 'updatedAt', 'verified'];
+  const PUBLIC_KEYS = ['advice', 'area', 'code', 'color', 'confidenceBand', 'helpArranged', 'lat', 'lng', 'openToAll', 'priority', 'reportCount', 'status', 'task', 'type', 'updatedAt', 'verified'];
 
   it('shows only coordinator-verified incidents, with only the public fields', async () => {
     const sub = submission({
@@ -611,8 +616,8 @@ describe('Database round-trips per request (measured for docs/scaling.md)', () =
     // Budgets = the counts measured on 2026-09-29 (docs/scaling.md). Staff requests also make one Supabase Auth call
     // (token check), not counted here. A higher count means a new query was added — update docs/scaling.md too.
     expect(counts).toEqual({
-      'GET /public/incidents': 2, 'POST /track': 4, 'POST /track/chat': 3, 'GET /admin/incidents': 4,
-      'GET /admin/incidents/:id': 10, 'GET /volunteer/assignments': 4, 'GET /volunteer/assignments/:id/chat': 4,
+      'GET /public/incidents': 2, 'POST /track': 4, 'POST /track/chat': 3, 'GET /admin/incidents': 5,
+      'GET /admin/incidents/:id': 11, 'GET /volunteer/assignments': 4, 'GET /volunteer/assignments/:id/chat': 4,
       'POST /reports + processing': 15,
     });
   });
@@ -987,7 +992,7 @@ describe('Reports by SMS (F27, BR-06, BR-07)', () => {
     const smsReport = await processed(byCode(sub.code).id);
     expect(one('incidents', smsReport.incident_id).medical).toBe(false);
 
-    speech.result = { text: 'My grandmother is unconscious', language: 'en', english: null };
+    speech.result = { text: 'My grandmother is unconscious', language: 'en', english: null, engine: 'PARAKEET' };
     const upload = await server.call('POST', '/reports', sub); // the outbox, once the phone is online
     expect(upload.status, upload.raw).toBe(200);
     expect(upload.body).toEqual({ ok: true, code: sub.code });
@@ -1246,5 +1251,144 @@ describe('Auto-dispatch and SOS to volunteers (F28, BR-160…BR-166)', () => {
     await runDispatch(); // Ravi timed out; Priya gets it
     await vi.waitFor(() => expect(one('profiles', priya.id).push_token).toBeNull());
     expect(one('profiles', ravi.id).push_token).toBe('device-token-1');
+  });
+});
+
+// ------------------------------------------------------------------------------------------------ F29 community help
+
+describe('Community help from the public map (F29, BR-170…BR-174)', () => {
+  const GATEWAY = 'http://gateway.test:8080';
+  let sms: { to: string; text: string }[];
+  const verify = (incidentId: string) => adminCall('POST', `/incidents/${incidentId}/verify`, { publicArea: 'Canal Road' });
+  const offer = (code: string, over: Record<string, unknown> = {}) =>
+    server.call('POST', `/public/incidents/${code}/help`, { name: 'Arun Kumar', phone: '+91 98400 11122', kinds: ['BOAT', 'HANDS'], note: 'I have a small boat', deviceId: 'helper-phone-1', ...over });
+  const publicFeed = async () => (await server.call('GET', '/public/incidents')).body.incidents as Record<string, unknown>[];
+  const offersOf = (incidentId: string) => table('help_offers').filter((o) => o.incident_id === incidentId);
+
+  beforeEach(() => {
+    process.env.SMS_GATEWAY_URL = GATEWAY;
+    sms = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      if (String(url) !== `${GATEWAY}/message`) throw new Error(`unexpected fetch ${url}`);
+      const b = JSON.parse(String(init?.body));
+      sms.push({ to: b.phoneNumbers[0], text: b.textMessage.text });
+      return new Response(null, { status: 202 });
+    });
+  });
+  afterEach(() => {
+    delete process.env.SMS_GATEWAY_URL;
+    vi.mocked(globalThis.fetch).mockRestore();
+  });
+
+  it('anyone can offer help on a hazard on the map that nobody has; coordinators see the phone, the public never does (BR-170, BR-171)', async () => {
+    const { incident } = await submit();
+    expect((await offer(incident.code)).status).toBe(404); // NEW: not on the map, so nothing to offer on
+    await verify(incident.id);
+
+    const first = await offer(incident.code);
+    expect(first.status, first.raw).toBe(201);
+    expect(first.body).toEqual({ ok: true, status: 'PENDING', task: null });
+    expect((await offer(incident.code, { phone: '+919840011122' })).status).toBe(200); // same phone again: nothing new
+    expect(offersOf(incident.id)).toHaveLength(1);
+    expect((await offer(incident.code, { phone: '12' })).status).toBe(400);
+    expect((await offer(incident.code, { kinds: ['HELICOPTER'] })).status).toBe(400);
+
+    expect(offersOf(incident.id)[0]).toMatchObject({ name: 'Arun Kumar', phone: '+919840011122', kinds: ['BOAT', 'HANDS'], status: 'PENDING' });
+    expect((await adminCall('GET', '/incidents')).body.incidents[0].pendingHelpOffers).toBe(1);
+    expect((await adminCall('GET', `/incidents/${incident.id}`)).body.helpOffers[0]).toMatchObject({ name: 'Arun Kumar', phone: '+919840011122', status: 'PENDING' });
+    expect(logsOf(incident.id).map((l) => l.text)).toContain('Arun Kumar offered to help from the public map');
+    const feed = JSON.stringify(await publicFeed());
+    expect(feed).not.toContain('Arun');
+    expect(feed).not.toContain('98400');
+    expect(server.errors).toEqual([]);
+  });
+
+  it('a coordinator accepts or declines; the helper gets an SMS and the reporter sees help is arranged (BR-173)', async () => {
+    const { sub, incident } = await submit();
+    await verify(incident.id);
+    await offer(incident.code);
+    await offer(incident.code, { name: 'Meena', phone: '+919840033344', deviceId: 'helper-phone-2' });
+    const [meena, arun] = offersOf(incident.id).sort((a, b) => a.name.localeCompare(b.name)).reverse(); // Meena, Arun Kumar
+
+    expect((await adminCall('POST', `/help-offers/${arun.id}/accept`)).status).toBe(200);
+    expect(one('help_offers', arun.id).status).toBe('ACCEPTED');
+    expect((await adminCall('POST', `/help-offers/${arun.id}/accept`)).status).toBe(409);
+    expect((await adminCall('POST', `/help-offers/${meena.id}/decline`)).status).toBe(200);
+    expect(one('help_offers', meena.id).status).toBe('DECLINED');
+    await vi.waitFor(() => expect(sms).toHaveLength(2));
+    expect(sms.find((m) => m.to === '+919840011122')?.text).toContain('accepted your offer');
+    expect(sms.find((m) => m.to === '+919840033344')?.text).toContain('covered for now');
+
+    const track = await server.call('POST', '/track', { code: sub.code, pin: sub.pin });
+    expect(track.body.messages.map((m: { text: string }) => m.text)).toContain('A helper from the community has been arranged by the coordination team');
+    expect(JSON.stringify(track.body)).not.toContain('Arun'); // the reporter never learns the helper's name or number
+    expect((await server.call('POST', `/admin/help-offers/${arun.id}/accept`, {}, { token: ravi.token })).status).toBe(403);
+  });
+
+  it('opened to anyone (only once it is on the map, with a task), anyone joins directly even with a volunteer there (BR-172)', async () => {
+    const { incident } = await submit();
+    const task = 'Carry sandbags to the canal wall; meet at the temple gate';
+    expect((await adminCall('POST', `/incidents/${incident.id}/open`, { open: true, task })).status).toBe(409); // not verified yet
+    await verify(incident.id);
+    expect((await adminCall('POST', `/incidents/${incident.id}/open`, { open: true, task: 'go' })).status).toBe(400);
+    const opened = await adminCall('POST', `/incidents/${incident.id}/open`, { open: true, task });
+    expect(opened.body).toMatchObject({ openToAll: true, publicTask: task });
+    expect((await publicFeed())[0]).toMatchObject({ openToAll: true, task });
+
+    const asg = await assign(incident.id, ravi);
+    await setStatus(ravi, asg, 'ACCEPTED'); // a volunteer is on it: still open to anyone
+    const joined = await offer(incident.code);
+    expect(joined.status).toBe(201);
+    expect(joined.body).toEqual({ ok: true, status: 'JOINED', task });
+    expect(offersOf(incident.id)[0].status).toBe('JOINED');
+    expect(logsOf(incident.id).map((l) => l.text)).toContain('Arun Kumar joined from the public map');
+
+    await adminCall('POST', `/incidents/${incident.id}/open`, { open: false });
+    expect((await publicFeed())[0]).toMatchObject({ openToAll: false, task: null, helpArranged: true });
+    expect((await offer(incident.code, { phone: '+919840055566' })).status).toBe(409); // closed and a volunteer has it
+  });
+
+  it('an approved volunteer takes a hazard from the map: accepted at once, and nobody else can take it (BR-174)', async () => {
+    const { incident } = await submit();
+    expect((await volunteerCall(ravi, 'POST', `/incidents/${incident.code}/take`)).status).toBe(404); // not on the map yet
+    await verify(incident.id);
+
+    const took = await volunteerCall(ravi, 'POST', `/incidents/${incident.code}/take`);
+    expect(took.status, took.raw).toBe(200);
+    expect(took.body).toMatchObject({ status: 'ACCEPTED', auto: false, incident: { code: incident.code } });
+    expect(one('incidents', incident.id).status).toBe('IN_PROGRESS');
+    expect(one('profiles', ravi.id).availability).toBe('BUSY');
+    expect(logsOf(incident.id).map((l) => l.text)).toContain('Volunteer Ravi took this incident from the public map');
+    expect((await publicFeed())[0]).toMatchObject({ helpArranged: true, status: 'RESPONDING' });
+
+    expect((await volunteerCall(priya, 'POST', `/incidents/${incident.code}/take`)).status).toBe(409);
+    expect((await offer(incident.code)).status).toBe(409); // the public can't offer once a volunteer has it
+
+    // An incident a coordinator already offered to someone can't be taken either.
+    const other = await submit(submission({ lat: DEMO_CENTER.lat + 0.05, locationText: 'Lake Road', text: 'A fallen tree is blocking the road' }));
+    await verify(other.incident.id);
+    await assign(other.incident.id, priya);
+    const kiran = await addStaff({ name: 'Kiran', role: 'VOLUNTEER' });
+    const late = await server.call('POST', `/volunteer/incidents/${other.incident.code}/take`, {}, { token: kiran.token });
+    expect(late.status).toBe(409);
+    expect(table('assignments').filter((a) => a.volunteer_id === kiran.id)).toHaveLength(0); // refused before anything was created
+    expect(server.errors).toEqual([]);
+  });
+
+  it('offers move with a merge and the clean-up deletes them (BR-50, retention)', async () => {
+    const a = await submit();
+    const b = await submit(submission({ lat: DEMO_CENTER.lat + 0.0009 }));
+    await verify(a.incident.id);
+    await offer(a.incident.code);
+    expect((await adminCall('POST', `/incidents/${a.incident.id}/merge`, { intoId: b.incident.id })).status).toBe(200);
+    expect(table('help_offers')[0].incident_id).toBe(b.incident.id);
+
+    await adminCall('POST', `/incidents/${b.incident.id}/resolve`);
+    await fakeDb.from('incidents').update({ updated_at: new Date(Date.now() - 40 * 86_400_000).toISOString() }).not('id', 'is', null);
+    const plan = await planCleanup(30);
+    expect(plan.helpOffers).toHaveLength(1);
+    await applyCleanup(plan);
+    expect(table('help_offers')).toHaveLength(0);
+    expect(table('incidents')).toHaveLength(0);
   });
 });

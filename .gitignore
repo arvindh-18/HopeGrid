@@ -16,3 +16,8 @@ HopeGrid.apk
 android/app/google-services.json
 secrets/
 *firebase-adminsdk*.json
+
+# Speech test recordings (people's voices) and synthetic clips: never in git
+eval/asr/clips/
+eval/asr/clips-synthetic/
+eval/asr/clips-fleurs/

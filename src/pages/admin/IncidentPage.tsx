@@ -19,7 +19,7 @@ import { usePoll } from '../../hooks/usePoll';
 import { mapsLink } from '../../lib/geo';
 import { publicWebUrl } from '../../lib/serverUrl';
 import { assignmentMessage, whatsappLink } from '../../lib/whatsapp';
-import { NEED_LABEL, PRIORITY_LABEL, TYPE_ICON, TYPE_LABEL } from '../../lib/labels';
+import { HELP_KIND_LABEL, NEED_LABEL, PRIORITY_LABEL, TYPE_ICON, TYPE_LABEL } from '../../lib/labels';
 
 type ModalKind =
   | null | 'verify' | 'reject' | 'resolve' | 'escalate' | 'override' | 'edit' | 'merge' | 'allocate'
@@ -246,6 +246,8 @@ export default function IncidentPage() {
               </div>
             )}
           </Section>
+
+          <CommunityHelp d={d} busy={busy} act={act} />
 
           <Section title="Priority" aside={<PriorityBadge level={d.priority} overridden={d.overridden} />}>
             <p className="t-caption mb-2">How urgent — score {d.priorityScore}{d.overridden ? `, calculated level ${PRIORITY_LABEL[d.computedPriority]}` : ''}</p>
@@ -574,5 +576,78 @@ function WhatsAppButton({ phone, message }: { phone: string | null; message: str
     <a href={link} target="_blank" rel="noreferrer" className="btn btn-sm self-start bg-[#25d366] text-ink no-underline hover:bg-[#1ebe5b]">
       <IconPhone size={16} /> Send on WhatsApp
     </a>
+  );
+}
+
+/** F29 — offers from the public map, and opening the incident to anyone with a public task (BR-172, BR-173). */
+function CommunityHelp({ d, busy, act }: { d: IncidentDetail; busy: boolean; act: (fn: () => Promise<IncidentDetail>, done: string) => Promise<void> }) {
+  const [task, setTask] = useState(d.publicTask ?? '');
+  const offers = d.helpOffers ?? []; // a server older than F29 sends none
+  const pending = offers.filter((o) => o.status === 'PENDING');
+  const others = offers.filter((o) => o.status !== 'PENDING');
+  const open = ['NEW', 'VERIFIED', 'IN_PROGRESS'].includes(d.status);
+  if (!open && offers.length === 0) return null;
+  return (
+    <Section title="Community help">
+      <div className="flex flex-col gap-4">
+        {open && (d.openToAll ? (
+          <div className="rounded-[12px] bg-canvas px-4 py-3">
+            <p className="t-caption">Open to anyone on the public map</p>
+            <p className="mt-1 t-body-sm text-ink">"{d.publicTask}"</p>
+            <Button size="sm" variant="outline" className="mt-3" busy={busy} onClick={() => act(() => api.setOpenToAll(d.id, false), 'Closed to the public')}>Stop</Button>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            <Field label="Let anyone join from the map" htmlFor="public-task" hint="For tasks many hands can do: clearing a road, carrying sandbags, handing out food. Everyone can read this, so no names or house details.">
+              <textarea id="public-task" className="input min-h-[64px]" maxLength={200} value={task} onChange={(e) => setTask(e.target.value)} placeholder="e.g. Carry sandbags to the canal wall; meet at the temple gate" />
+            </Field>
+            <Button size="sm" className="self-start" busy={busy} disabled={task.trim().length < 5} onClick={() => act(() => api.setOpenToAll(d.id, true, task), 'Opened to anyone')}>Open to anyone</Button>
+          </div>
+        ))}
+        {pending.length > 0 && (
+          <div>
+            <p className="t-caption mb-2">Offers waiting for you ({pending.length})</p>
+            <ul className="flex flex-col gap-2">
+              {pending.map((o) => (
+                <li key={o.id} className="rounded-[12px] border border-strong px-4 py-3">
+                  <OfferLine o={o} />
+                  <div className="mt-2 flex gap-2">
+                    <Button size="sm" busy={busy} onClick={() => act(() => api.acceptHelpOffer(o.id), `Accepted ${o.name}'s offer`)}>Accept</Button>
+                    <Button size="sm" variant="outline" disabled={busy} onClick={() => act(() => api.declineHelpOffer(o.id), 'Offer declined')}>Decline</Button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {others.length > 0 && (
+          <div>
+            <p className="t-caption mb-2">Helpers</p>
+            <ul className="flex flex-col gap-2">
+              {others.map((o) => (
+                <li key={o.id} className="flex items-start justify-between gap-2 t-body-sm">
+                  <OfferLine o={o} />
+                  <Tag tone={o.status === 'DECLINED' ? 'neutral' : 'ok'}>{o.status === 'JOINED' ? 'Joined' : o.status === 'ACCEPTED' ? 'Accepted' : 'Declined'}</Tag>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {open && offers.length === 0 && !d.openToAll && (
+          <p className="t-caption">People who see this on the public map can offer help once it is verified. Offers appear here.</p>
+        )}
+      </div>
+    </Section>
+  );
+}
+
+function OfferLine({ o }: { o: IncidentDetail['helpOffers'][number] }) {
+  return (
+    <div className="min-w-0">
+      <p className="font-medium text-ink">{o.name} <a className="t-caption ml-1 underline" href={`tel:${o.phone}`}>{o.phone}</a></p>
+      {o.kinds.length > 0 && <p className="t-caption">{o.kinds.map((k) => HELP_KIND_LABEL[k]).join(', ')}</p>}
+      {o.note && <p className="t-caption">"{o.note}"</p>}
+      <p className="t-caption">{timeAgo(o.createdAt)}</p>
+    </div>
   );
 }

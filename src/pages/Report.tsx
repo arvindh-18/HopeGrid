@@ -7,8 +7,7 @@ import { IconCamera, IconPin, IconTrash } from '../components/Icons';
 import { Layout } from '../components/Layout';
 import { Button, Field, Spinner, useToast } from '../components/ui';
 import { VoiceRecorder, type VoiceNote } from '../components/VoiceRecorder';
-import { useLiveDictation } from '../hooks/useLiveDictation';
-import { LANGS, useI18n } from '../i18n';
+import { useI18n } from '../i18n';
 import { newPin, newReportCode, newUuid } from '../lib/codes';
 import { getPosition, type Position } from '../lib/geo';
 import { PEOPLE_CHOICES } from '../lib/labels';
@@ -25,7 +24,7 @@ const cleanPhone = (raw: string) => raw.replace(/\s+/g, '');
 export default function Report() {
   const navigate = useNavigate();
   const toast = useToast();
-  const { t, server, need } = useI18n();
+  const { t, server, need, lang } = useI18n();
   const [text, setText] = useState('');
   const [voice, setVoice] = useState<VoiceNote | null>(null);
   const [loc, setLoc] = useState<Loc>({ state: 'locating' });
@@ -40,8 +39,6 @@ export default function Report() {
   const [triedSubmit, setTriedSubmit] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const dictation = useLiveDictation((t) => setText((prev) => (prev ? `${prev} ${t}` : t)));
-  const [liveText, setLiveText] = useState(false);
 
   function locate() {
     setLoc({ state: 'locating' });
@@ -95,6 +92,7 @@ export default function Report() {
         audioBase64: voice?.base64 ?? null,
         audioMime: voice?.mime ?? null,
         audioSeconds: voice?.seconds ?? null,
+        language: lang, // helps the server pick the speech engine for the voice note (BR-12)
         createdAt: new Date().toISOString(),
       };
       await outbox.enqueue(sub); // always queued first — never waits for the network
@@ -119,27 +117,10 @@ export default function Report() {
             id="what" className="input" value={text} onChange={(e) => setText(e.target.value)} maxLength={2000}
             placeholder={t('report.placeholder')} aria-invalid={triedSubmit && !hasContent}
           />
-          <VoiceRecorder
-            value={voice}
-            onChange={setVoice}
-            onRecordingChange={(rec) => { if (liveText) { if (rec) dictation.start(); else dictation.stop(); } }}
-          />
+          <VoiceRecorder value={voice} onChange={setVoice} />
           {/* Not tied to "online": the Android app's WebView reports online even without data. */}
           {SMS_NUMBER && voice && text.trim().length < MIN_REPORT_TEXT && (
             <p className="t-caption">{t('sms.addWords')}</p>
-          )}
-          {dictation.supported && (
-            <div className="flex flex-wrap items-center gap-3 t-caption">
-              <label className="flex items-center gap-2">
-                <input type="checkbox" checked={liveText} onChange={(e) => setLiveText(e.target.checked)} className="h-4 w-4 accent-black" />
-                {t('report.liveText')}
-              </label>
-              {liveText && (
-                <select aria-label={t('lang.label')} className="rounded border border-hairline bg-white px-2 py-1" value={dictation.lang} onChange={(e) => dictation.setLang(e.target.value)}>
-                  {LANGS.map((l) => <option key={l.speech} value={l.speech}>{l.name}</option>)}
-                </select>
-              )}
-            </div>
           )}
         </section>
 

@@ -49,6 +49,7 @@ export const realApi: Api = {
   sendVictimMessage: (code, pin, msg) => post('/track/chat/send', { code, pin, ...msg }),
   // Public
   getPublicIncidents: () => get('/public/incidents'),
+  offerHelp: (code, input) => post(`/public/incidents/${id(code)}/help`, input),
   // Auth
   login: (email, password) => post('/auth/login', { email, password }),
   me: () => get('/auth/me'),
@@ -66,6 +67,9 @@ export const realApi: Api = {
   assignVolunteer: (incidentId, volunteerId) => post(`/admin/incidents/${id(incidentId)}/assign`, { volunteerId }),
   cancelAssignment: (assignmentId) => post(`/admin/assignments/${id(assignmentId)}/cancel`),
   allocateResource: (incidentId, resourceId, quantity) => post(`/admin/incidents/${id(incidentId)}/allocate`, { resourceId, quantity }),
+  setOpenToAll: (incidentId, open, task) => post(`/admin/incidents/${id(incidentId)}/open`, { open, task }),
+  acceptHelpOffer: (offerId) => post(`/admin/help-offers/${id(offerId)}/accept`),
+  declineHelpOffer: (offerId) => post(`/admin/help-offers/${id(offerId)}/decline`),
   getDispatch: () => get('/admin/dispatch'),
   saveDispatch: (settings) => request('PUT', '/admin/dispatch', settings),
   listResources: () => get('/admin/resources'),
@@ -78,6 +82,7 @@ export const realApi: Api = {
   updateAssignmentStatus: (assignmentId, status, reason) => post(`/volunteer/assignments/${id(assignmentId)}/status`, { status, reason }),
   getAssignmentChat: (assignmentId) => get(`/volunteer/assignments/${id(assignmentId)}/chat`),
   registerPushToken: (token) => post('/volunteer/push-token', { token }),
+  takeIncident: (code) => post(`/volunteer/incidents/${id(code)}/take`),
   sendVolunteerMessage: (assignmentId, reportId, msg) => post(`/volunteer/assignments/${id(assignmentId)}/chat`, { reportId, ...msg }),
   // Volunteer registration (F26)
   applyAsVolunteer: (input) => post('/volunteer-applications', input),

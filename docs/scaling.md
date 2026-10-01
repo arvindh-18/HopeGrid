@@ -6,17 +6,17 @@
 
 ## 1. Current shape (implemented)
 
-One server process on one laptop: Express API, report pipeline, Whisper and the LLM. Postgres, Storage and Auth run
+One server process on one laptop: Express API, report pipeline, speech engines and the LLM. Postgres, Storage and Auth run
 on Supabase (cloud). Screens poll the API; staff and victim screens also get live change signals
 (§7) and then poll only as a slow safety net.
 
 | Resource | Limit today | Where |
 |---|---|---|
-| AI structuring | One report at a time (one model, one context) | `server/ai.ts` `exclusive()` |
+| AI structuring | One call at a time (structuring, or the English version of a Tamil/Hindi voice note) | `server/ai.ts` `exclusive()` |
 | Speech-to-text | One voice note at a time | `server/transcribe.ts` `exclusive()` |
 | Report processing | At most 2 reports in progress; the rest wait in a queue | `server/pipeline.ts` `MAX_CONCURRENT` |
 | Server instances | 1: the queue and the in-flight guard live in one process's memory | `server/pipeline.ts` |
-| Model memory | ~2 GB (LLM) + ~0.5 GB (Whisper) on the server laptop | `models/` |
+| Model memory | ~2 GB (LLM) + 1.67 GB peak for the four speech models (Whisper alone: 0.74 GB, before BR-12 routing) on the server laptop | `models/` |
 
 ## 2. Measured numbers
 
@@ -30,8 +30,8 @@ Supabase Auth call (token check), not included.
 | `GET /public/incidents` | 2 |
 | `POST /track` | 4 |
 | `POST /track/chat` | 3 |
-| `GET /admin/incidents` | 4 (+1 auth) |
-| `GET /admin/incidents/:id` | 10 (+1 auth) |
+| `GET /admin/incidents` | 5 (+1 auth; was 4 before F29 added the help-offer count) |
+| `GET /admin/incidents/:id` | 11 (+1 auth; was 10 before F29 added the help offers) |
 | `GET /volunteer/assignments` | 4 (+1 auth) |
 | `GET /volunteer/assignments/:id/chat` | 4 (+1 auth) |
 | New report: `POST /reports` + background processing | 15 |
@@ -42,14 +42,19 @@ The test fails if a code change adds queries, so these numbers stay current.
 Apple M2, 8 GB RAM, Metal GPU; `eval/bench.ts`, median of 3 runs, synthetic text-to-speech audio (details in
 `docs/evaluation.md` §4).
 
-| Step | Median |
-|---|---|
-| Speech-to-text, 8.4 s English | 1.2 s |
-| Speech-to-text + English translation, 8.2 s Hindi / 6.3 s Tamil | 3.5 s / 6.7 s |
-| AI structuring per report | 5.1–6.4 s (first call after start: 9–12 s) |
-| Model loading at server start | Whisper 0.75 s, LLM 4.4–4.6 s |
+| Step | Median, 2026-09-29 (Whisper only) | Median, 2026-10-01 (BR-12 routing) |
+|---|---|---|
+| Speech-to-text, 8.4 s English | 1.2 s | 1.7 s (language guess + Parakeet) |
+| Speech-to-text + English version, 8.2 s Hindi / 6.3 s Tamil | 3.5 s / 6.7 s | 6.3 s / 7.4 s (IndicConformer + the AI's translation) |
+| AI structuring per report | 5.1–6.4 s (first call after start: 9–12 s) | 6.2–7.4 s* |
+| Model loading at server start | Whisper 0.75 s, LLM 4.4–4.6 s | all four speech models 2.1 s, LLM 4.8 s |
 
-Computed: one voice report ≈ 8–13 s of model time; the AI step caps one laptop at roughly 650 reports/hour.
+\* The 2026-10-01 run had heavy memory pressure (1.1 GB free, 5.6 GB swap in use, with the HopeGrid server and
+other apps running), so its AI times are slower than the earlier run for reasons other than the code.
+
+Computed: one voice report ≈ 8–15 s of model time. The AI step caps one laptop at roughly 650 reports/hour; a
+Tamil or Hindi voice note also uses the AI for its English version (~3 s), so all-voice Tamil/Hindi traffic caps at
+roughly 400 reports/hour.
 Under heavy memory pressure (8 GB laptop with other apps open) one AI call took 17 minutes, which is why 16 GB is
 advised.
 
@@ -63,8 +68,8 @@ Requests per minute per open screen come from the polling intervals in `shared/c
 | Public map | 4 | 8 |
 | Victim tracking, chat closed (`/track` every 10 s + `/track/chat` every 10 s) | 12 | 42 |
 | Victim tracking, chat open (`/track/chat` every 4 s) | 21 | 69 |
-| Coordinator dashboard (every 5 s) | 12 | 48 (+12 auth) |
-| Coordinator incident page (every 5 s) | 12 | 120 (+12 auth) |
+| Coordinator dashboard (every 5 s) | 12 | 60 (+12 auth) |
+| Coordinator incident page (every 5 s) | 12 | 132 (+12 auth) |
 | Volunteer assignment page, chat open | 27 | 108 (+27 auth) |
 
 With live change signals (§7), an **idle** watched screen polls only every 30 s instead: dashboard 2, incident page 2,
@@ -72,7 +77,7 @@ victim tracking 4 (two watched calls) and volunteer assignment page 4 requests p
 each watched screen makes one refresh, never more often than the table above.
 
 **Example (computed, not measured), worst case with every screen polling at the old rates:** 100 victims tracking with chat closed, 200 people on the map, 3 coordinators
-on incident pages and 10 volunteers in active chats cause about **2,300 API requests/min (~38/s)** and **~7,200
+on incident pages and 10 volunteers in active chats cause about **2,300 API requests/min (~38/s)** and **~7,300
 database round-trips/min (~120/s)**, plus ~300 auth calls/min (3 × 12 + 10 × 27). Polling, not report volume, dominates the load.
 Whether a given Supabase plan sustains this is **TODO: needs verification** (plan limits not checked).
 
@@ -80,7 +85,7 @@ Whether a given Supabase plan sustains this is **TODO: needs verification** (pla
 
 1. **AI structuring throughput.** Reports are structured one at a time on one model. The time per report (§2.2)
    caps the reports per hour on one laptop. The queue keeps the rest waiting safely rather than failing them.
-2. **Polling fan-out** (§3). The coordinator incident page is the most expensive (10 queries every 5 s). Live change
+2. **Polling fan-out** (§3). The coordinator incident page is the most expensive (11 queries every 5 s). Live change
    signals (§7) cut idle polling about 6×, but every change still costs one refetch per watching screen.
 3. **One laptop.** Power, network or hardware failure stops processing; nothing is lost, but nothing moves.
 4. **Memory.** On the 8 GB test laptop, running the models alongside other apps caused heavy swapping, and one

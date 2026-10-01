@@ -19,7 +19,7 @@ import { publicRouter } from './routes/public';
 import { smsRouter } from './routes/sms';
 import { victimRouter } from './routes/victim';
 import { volunteerRouter } from './routes/volunteer';
-import { loadWhisper } from './transcribe';
+import { loadSpeechModels } from './transcribe';
 
 const HTTP_STATUS: Record<ErrorCode, number> = {
   VALIDATION: 400,
@@ -81,7 +81,7 @@ app.listen(port, () => {
   // Load the local AI and speech models once (if `npm run setup-ai` installed them), then process every report
   // still PENDING (D9: nothing is lost on restart). Without a model each report falls back (BR-11, BR-12).
   const warm = (name: string, load: () => Promise<unknown>) => load().then(
-    () => console.log(`${name} ready`),
+    (which) => console.log(`${name} ready${typeof which === 'string' ? `: ${which}` : ''}`),
     (e) => console.warn(`${name} unavailable: ${e instanceof Error ? e.message : e}`),
   );
   checkSchema().catch((e) => console.warn(e instanceof Error ? e.message : e));
@@ -89,7 +89,7 @@ app.listen(port, () => {
   onReportProcessed(() => void runDispatch());
   startDispatcher();
   if (process.env.SMS_WEBHOOK_SECRET?.trim()) console.log('SMS reports on: POST /api/sms/incoming');
-  Promise.all([warm('AI model', loadAiModel), warm('Speech model', loadWhisper)])
+  Promise.all([warm('AI model', loadAiModel), warm('Speech models', loadSpeechModels)])
     .then(processPendingReports)
     .catch((e) => console.error('Processing pending reports failed:', e));
 });

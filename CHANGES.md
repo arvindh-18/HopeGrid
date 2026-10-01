@@ -301,11 +301,74 @@ whenever the phone has signal, even without mobile data.
 - **Evidence:** 127 tests pass (13 new); type-check clean; 6 deliberate breaks, all caught (one after tightening a test).
   Not yet on devices: the SOS screen on a real phone, and push with a real Firebase project.
 
+## Community help from the map (2026-10-01, F29)
+
+- **Split by trust (owner's choice):** approved volunteers take an unassigned verified hazard straight from the map;
+  anyone else sends an offer that a coordinator reviews; a coordinator can open a hazard to anyone, with a public task.
+- **Screens:**
+  - Map (map and list view): "Can you help?" with take, offer or join, in English, Tamil and Hindi.
+  - Incident page: a "Community help" section (open or stop, accept or decline offers, the helpers so far).
+  - Dashboard: "🙋 N offers of help". Volunteer home: a link to the map.
+- **Safety:**
+  - Offers only on hazards already on the map.
+  - Phones are for coordinators only; the public feed never carries names or phones.
+  - Helpers never see the reporter's details.
+  - One offer per phone.
+  - A safety line on every help action.
+- **Also fixed:** in list view the hazard card didn't open at all; it does now.
+- **Database:** a `help_offers` table, plus `incidents.open_to_all` and `incidents.public_task`. Re-run `schema.sql`.
+  Merges move offers; clean-up and demo reset delete them.
+- **Evidence:**
+  - 135 tests pass (8 new); type-check and build clean.
+  - 5 deliberate breaks, all caught (one after tightening a test).
+  - Offer and join clicked through in headless Chrome at phone size.
+  - Dashboard and incident page now make 5 and 11 queries per refresh (was 4 and 10); `docs/scaling.md` updated.
+
+## Speech-to-text routed by language (2026-10-01, BR-12)
+
+- **What changed:** each voice note now goes to the engine that measured best for its language, instead of Whisper
+  small for everything.
+  - Tamil → AI4Bharat IndicConformer Tamil; Hindi → IndicConformer Hindi; English → NVIDIA Parakeet TDT 0.6B v3.
+  - Other languages → Whisper small, which also guesses the language and takes over when an engine fails.
+  - The English version of Tamil and Hindi now comes from the local AI (Qwen), translating the text staff see.
+  - The app sends its language with each report as a hint (`reports.app_language`).
+  - The "live text" tickbox (F24) is removed: it used the browser's Google speech service, needed internet and
+    usually didn't work in the Android app. Voice notes are transcribed on the server only.
+- **Language guess:** Whisper listens to the first 30 s but writes out only 1 s (about twice as fast). Its known
+  mix-ups are corrected: Urdu → Hindi, Malayalam → Tamil. If it guesses something else, a Tamil or Hindi app
+  language wins.
+- **Measured through the real server code** on 25 real FLEURS recordings per language (`npm run eval:asr`):
+
+  | Character errors | Before (clean) | Now (clean) | Before (loud noise, 5 dB) | Now (loud noise) |
+  |---|---|---|---|---|
+  | Tamil | 37.9% | **20.5%** | 62.6% | **35.5%** |
+  | Hindi | 36.3% | **5.0%** | 62.8% | **10.6%** |
+  | English | 8.6% | **7.9%** | 14.0% | **11.3%** |
+
+  - Wrong language guesses: 4 → 0 (clean) and 13 → 3 (noise) with no app language. The 3 left were
+    Norwegian/Sinhala guesses for noisy Tamil; with the app in Tamil they go to 0 and noisy Tamil drops to 24.9%.
+  - English: Parakeet ties Whisper turbo on accuracy and is 11× faster; both beat Whisper small.
+  - English version (chrF, higher is better): Hindi 43.4 → 50.4, Tamil 27.2 → 27.4 (still weak: the 3B AI's Tamil
+    is the limit).
+- **Setup:** `npm run setup-ai` also downloads Parakeet (4-bit, ~420 MB) and the two IndicConformer models (~335 MB),
+  pinned to exact versions and checked by SHA-256. `sherpa-onnx-node` moved from a dev to a runtime dependency.
+- **Found on the way:**
+  - The "multi-Indic" model is really AI4Bharat's Hindi model: 107% character errors on Tamil. Renamed
+    `models/indicconformer-hi`.
+  - Qwen 2.5 **3B** is under the Qwen Research License (non-commercial), not Apache-2.0; README and TODO say so.
+- **Evidence:**
+  - 151 tests pass: 8 new routing tests with stand-in engines and 8 new rule and API tests. Type-check (now also
+    `eval/asr.ts`) and build clean.
+  - 11 deliberate breaks (M33–M43), all caught.
+- **Database:** `reports.app_language`. **Run `schema.sql` before restarting the server**: the new code writes that
+  column, so reports would fail to save without it.
+
 ## Only you can do these
 
 - **Rotate the Supabase keys.**
-- **Run `supabase/schema.sql` again** so the `volunteer_applications` table and the SMS columns (`channel`,
-  `pending_media`, `completed_at`) exist.
+- **Run `supabase/schema.sql` again** so the `volunteer_applications` table, the SMS columns (`channel`,
+  `pending_media`, `completed_at`), the F28/F29 tables and columns, and `reports.app_language` exist. Do it **before**
+  restarting the server on the new code.
 - **Set up the SMS gateway phone** (README → "Reports by SMS") and test it with a real SMS.
 - **Tell me the hackathon track** (placeholder at the top of `docs/problem.md`).
 - **Check live updates through a real `npm run tunnel` link** on two phones (not tested through a live tunnel).

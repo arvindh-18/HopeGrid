@@ -11,15 +11,13 @@ export interface VoiceNote { base64: string; mime: string; seconds: number; url:
 interface Props {
   value: VoiceNote | null;
   onChange: (v: VoiceNote | null) => void;
-  /** Called on every recording start/stop, e.g. to start live dictation. */
-  onRecordingChange?: (recording: boolean) => void;
   compact?: boolean;
   disabled?: boolean;
 }
 
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
-export function VoiceRecorder({ value, onChange, onRecordingChange, compact, disabled }: Props) {
+export function VoiceRecorder({ value, onChange, compact, disabled }: Props) {
   const { t } = useI18n();
   const [recording, setRecording] = useState(false);
   const [elapsed, setElapsed] = useState(0);
@@ -59,7 +57,6 @@ export function VoiceRecorder({ value, onChange, onRecordingChange, compact, dis
       started.current = Date.now();
       setElapsed(0);
       setRecording(true);
-      onRecordingChange?.(true);
       tick.current = setInterval(() => {
         const s = (Date.now() - started.current) / 1000;
         setElapsed(s);
@@ -76,7 +73,6 @@ export function VoiceRecorder({ value, onChange, onRecordingChange, compact, dis
     if (recorder.current && recorder.current.state !== 'inactive') recorder.current.stop();
     recorder.current = null;
     setRecording(false);
-    onRecordingChange?.(false);
   }
 
   function togglePlay() {

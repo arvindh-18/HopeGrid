@@ -24,30 +24,37 @@ export const nodeLlamaCppStub = {
   LlamaChatSession,
 };
 
-/** What the stub Whisper returns for a voice note. A string in `error` makes it fail; `gate` holds it until resolved. */
-export const speech: { result: Transcript; error: string | null; calls: string[]; gate: Promise<void> | null } = {
-  result: { text: 'stub transcript', language: 'en', english: null },
+/**
+ * What the stub speech engine returns for a voice note; `hints` records the app language each call was given. A
+ * string in `error` makes it fail; `gate` holds it until resolved.
+ */
+export const speech: { result: Transcript; error: string | null; calls: string[]; hints: (string | null)[]; gate: Promise<void> | null } = {
+  result: { text: 'stub transcript', language: 'en', english: null, engine: 'PARAKEET' },
   error: null,
   calls: [],
+  hints: [],
   gate: null,
 };
 
 export const transcribeStub = {
-  transcribe: async (storagePath: string): Promise<Transcript> => {
+  transcribe: async (storagePath: string, hint: string | null = null): Promise<Transcript> => {
     speech.calls.push(storagePath);
+    speech.hints.push(hint);
     if (speech.gate) await speech.gate;
     if (speech.error) throw new Error(speech.error);
     return speech.result;
   },
   loadWhisper: async () => ({}),
+  loadSpeechModels: async () => 'stub',
   ensureWhisperModelFile: async () => '/stub/ggml-small.bin',
 };
 
 export function resetStubs(): void {
   llm.answer = null;
   llm.prompts = [];
-  speech.result = { text: 'stub transcript', language: 'en', english: null };
+  speech.result = { text: 'stub transcript', language: 'en', english: null, engine: 'PARAKEET' };
   speech.error = null;
   speech.calls = [];
+  speech.hints = [];
   speech.gate = null;
 }

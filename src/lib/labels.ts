@@ -1,6 +1,6 @@
 // src/lib/labels.ts — enum → display text, icons and colour keys. UI copy lives here, not in components.
 import type {
-  AssignmentStatus, Availability, ConfidenceBand, Equipment, IncidentStatus, IncidentType, MarkerColor, Need,
+  AssignmentStatus, Availability, ConfidenceBand, Equipment, HelpKind, IncidentStatus, IncidentType, MarkerColor, Need,
   PriorityLevel, PublicStatus, ResourceCategory, Skill, UnableReason, Vehicle,
 } from '../../shared/types';
 
@@ -32,6 +32,9 @@ export const ASSIGNMENT_LABEL: Record<AssignmentStatus, string> = {
   ASSISTING: 'Helping', DONE: 'Done', UNABLE: 'Unable to continue', CANCELLED: 'Cancelled',
 };
 export const AVAILABILITY_LABEL: Record<Availability, string> = { AVAILABLE: 'Available', BUSY: 'On a response', OFFLINE: 'Not available' };
+export const HELP_KIND_LABEL: Record<HelpKind, string> = {
+  HANDS: 'Physical help', VEHICLE: 'Vehicle', BOAT: 'Boat', FIRST_AID: 'First aid', FOOD_WATER: 'Food or water', SHELTER: 'Shelter', OTHER: 'Other',
+};
 export const UNABLE_LABEL: Record<UnableReason, string> = {
   NO_ACCESS: 'Cannot reach the place', MISSING_EQUIPMENT: 'Missing equipment', UNSAFE: 'Unsafe to continue',
   PERSONAL: 'Personal reason', TOO_FAR: 'Too far away', OTHER: 'Other reason',

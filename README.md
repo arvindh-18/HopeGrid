@@ -31,12 +31,16 @@ npm start          # API server serving the production build (dist/)
 npm run tunnel     # public HTTPS link to :3000 for phones
 ```
 
-Requires Node.js 22.12+. **Nothing else to install**: the local AI (Qwen 2.5 3B via node-llama-cpp), speech-to-text (whisper.cpp) and ffmpeg all come from npm and run inside the server. Only the laptop that hosts the server needs the AI models (`npm run setup-ai`); phones and other devices just open the website.
+Requires Node.js 22.12+. **Nothing else to install**: the local AI (Qwen 2.5 3B via node-llama-cpp), speech-to-text (AI4Bharat IndicConformer for Tamil and Hindi via sherpa-onnx, NVIDIA Parakeet for English and whisper.cpp for language detection and other languages) and ffmpeg all come from npm and run inside the server. Only the laptop that hosts the server needs the AI models (`npm run setup-ai`); phones and other devices just open the website.
 
 First-time setup:
 
 1. `npm install`: installs the code only (small, no models).
-   - **Server laptop only:** `npm run setup-ai` downloads the AI and speech models into `models/` (about 2.5 GB, once). Without them the app still works: reports are structured by the keyword fallback and voice notes are left for staff to listen to.
+   - **Server laptop only:** `npm run setup-ai` downloads the AI and speech models into `models/` (about 3.3 GB, once; files are checked against pinned checksums). Without them the app still works: reports are structured by the keyword fallback and voice notes are left for staff to listen to.
+   - Models and their licences: Qwen 2.5 3B Instruct (**Qwen Research License**: research and non-commercial use;
+     the 1.5B and 7B sizes are Apache-2.0); Whisper small (Apache-2.0, OpenAI); Parakeet TDT 0.6B v3 (CC-BY-4.0,
+     NVIDIA; whisper.cpp conversion by ggml-org); IndicConformer Tamil and Hindi (MIT, AI4Bharat; sherpa-onnx
+     conversions by csndhanasekar and meetsync on Hugging Face).
 2. Run `supabase/schema.sql` in the Supabase SQL editor, and fill in `.env` (see `.env.example`). It is safe to run again (`create … if not exists`); run it again after pulling changes that add tables (e.g. `volunteer_applications` for volunteer registration).
 3. `npm run seed` creates the staff accounts and demo data.
 4. In Supabase Auth settings, set JWT expiry to 86400 s so staff sessions last the whole demo.
@@ -68,6 +72,15 @@ online again, its outbox uploads the photo, voice note and full text into the sa
 4. `npm start`, then `npm run sms:connect` (gateway phone reaches the ngrok address; it needs mobile data) or
    `npm run sms:connect -- --usb` (phone plugged in by USB with USB debugging on; also turn off "Require Internet
    connection" in the gateway app's webhook settings). Rebuild the website/app so it contains `VITE_SMS_NUMBER`.
+
+Community help (F29): on the safety map, a verified hazard's card says "Can you help?":
+- **Approved volunteers** can take one that nobody has yet; it becomes their assignment.
+- **Anyone else** can offer help (name, phone, what they can bring), and a coordinator accepts or declines it on the
+  incident page. The helper gets an SMS either way.
+- **Open to anyone:** for tasks many hands can do, a coordinator can open the incident to anyone with a public task
+  ("carry sandbags; meet at the temple gate"), and people then join directly.
+
+Helpers never see the reporter's details. After pulling this, run `supabase/schema.sql` again.
 
 Auto-dispatch and SOS (F28): on the coordinator dashboard, **Auto-dispatch** can be Off, **When overloaded** (more
 than N incidents waiting) or **Always**. The system then offers each waiting incident, most urgent first, to the
@@ -132,7 +145,7 @@ Pages only call `src/data/index.ts` (`api`), which is backed by `src/data/realAp
 
 | | What |
 |---|---|
-| **Real and tested** | Offline report outbox; report API with idempotent resend; reports by SMS through a gateway phone, with the later upload joining the same report (API-tested; the phone opening its SMS app with the packed report checked in the Android emulator; not yet tried with a real gateway phone); local speech-to-text (Whisper) with English translation; local AI structuring (Qwen 2.5 3B) with keyword fallback, and the keyword type used when the rules find one (BR-11a); confidence and priority with reasons; duplicate flags (never auto-merged); volunteer matching; assignment workflow; private chat; public map limited to coordinator-verified incidents; Tamil/Hindi victim screens; retrying processing queue; live change signals (SSE) with polling fallback; retention clean-up script; volunteer self-registration with coordinator review of an ID-proof photo. See `docs/verification.md`. |
+| **Real and tested** | Offline report outbox; report API with idempotent resend; reports by SMS through a gateway phone, with the later upload joining the same report (API-tested; the phone opening its SMS app with the packed report checked in the Android emulator; not yet tried with a real gateway phone); local speech-to-text routed by language (IndicConformer for Tamil and Hindi, Parakeet for English, Whisper for the rest; measured on real FLEURS recordings, clean and with noise) with an English version from the local AI; local AI structuring (Qwen 2.5 3B) with keyword fallback, and the keyword type used when the rules find one (BR-11a); confidence and priority with reasons; duplicate flags (never auto-merged); volunteer matching; assignment workflow; private chat; public map limited to coordinator-verified incidents; Tamil/Hindi victim screens; retrying processing queue; live change signals (SSE) with polling fallback; retention clean-up script; volunteer self-registration with coordinator review of an ID-proof photo. See `docs/verification.md`. |
 | **Simulated** | Phone verification: no SMS is sent, the code is always `123456`. Escalation to emergency services: only a log line, no external call. Seeded demo staff and incidents. |
 | **Measured but modest** | On synthetic reports the incident type is right 70% of the time (both sets); all fields right for only about a quarter of reports; Tamil is weak. See `docs/evaluation.md`. |
 | **Manual by design** | Volunteer ID check: a coordinator looks at the photo; nothing is checked automatically (no Aadhaar/DigiLocker lookup). |

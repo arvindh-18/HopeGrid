@@ -79,6 +79,7 @@
 - `phone`: null or 7–15 characters of digits with optional leading `+`.
 - `needs`: only valid `Need` values.
 - Photo: base64 length ≤ `MAX_PHOTO_BASE64`. Audio: ≤ `MAX_AUDIO_BASE64` and `audioSeconds ≤ MAX_AUDIO_SECONDS`.
+- `language`: absent, null, or `en` | `ta` | `hi` (stored as `app_language`, BR-12).
 - `code`/`pin` formats per BR-01.
 
 **BR-04 Photo.** Maximum 1 per report. Before storing, resize so the longest side is ≤ 1280 px and re-encode as JPEG quality 0.7 (this also removes EXIF data).
@@ -171,9 +172,11 @@ synthetic evaluation sets, type accuracy went from 58% to 70% (main) and 55% to 
 affected (docs/evaluation.md). `ai_source` stays `AI`.
 
 **BR-12 Transcription.**
-- If a report has audio: `transcribe()` with language auto-detect and timeout `WHISPER_TIMEOUT_MS`.
+- If a report has audio: `transcribe(audio_path, app_language)` with timeout `WHISPER_TIMEOUT_MS`. `app_language` (`en` | `ta` | `hi`, or null from older apps) is the language the person used the app in (shared/speech.ts, server/transcribe.ts).
+- **Which language:** Whisper guesses from the first 30 s (it writes out only the first second, so this is quick). Its guess is corrected for the neighbours it mixes up: Urdu → Hindi, Malayalam → Tamil. A guess of English, Tamil or Hindi is used as it is, even when the app is in another language. Any other guess becomes the app's language if that is Tamil or Hindi; otherwise the speech stays in Whisper's language. Without Whisper, the app's language is used.
+- **Which engine:** Tamil → AI4Bharat IndicConformer Tamil; Hindi → IndicConformer Hindi; English → NVIDIA Parakeet TDT 0.6B v3; every other language → Whisper, told the language. If the chosen engine is missing, fails or hears nothing, Whisper takes over.
 - Success → `transcript`, `transcript_status = DONE`. Failure → `transcript_status = FAILED` and an admin log line "Voice note could not be transcribed — listen to it".
-- Non-English speech (Whisper-detected language ≠ `en`) gets a second Whisper pass with `translate: true`. The stored `transcript` is the original text plus `"\n\nEnglish: " + translation`. A failed translation only drops the English line.
+- **English version** of non-English speech: the local AI translates Tamil and Hindi text (the transcript is data, never instructions). Whisper's `translate` pass is used for other languages, or when the AI is unavailable or answers nothing. The stored `transcript` is the original text plus `"\n\nEnglish: " + translation`. A failed translation only drops the English line.
 - Processing continues either way. The description given to AI is `text + "\n" + spoken text`, plus `"(English machine translation, may be inaccurate: …)"` when there is one — the AI reads both, because a poor translation can lose facts the original keeps.
 
 **BR-13 Victim input overrides AI and creates the incident.**
@@ -546,6 +549,44 @@ clears `auto_dispatched_at`.
 **BR-166 Coordinators stay in charge.** Auto-dispatch only creates assignments. It never verifies, rejects, merges,
 escalates or resolves. Coordinators can cancel any assignment (BR-104), reassign, or switch it OFF at any time.
 
+## B13. Community help from the public map (F29)
+
+Split by trust: approved volunteers (ID-checked, BR-150) may take an incident; anyone else offers, and a coordinator
+decides, unless a coordinator opened the incident to anyone. Nobody who offers or joins learns the reporter's name,
+number, report text or exact house (AR-22, AR-23).
+
+**BR-170 An offer.** `POST /api/public/incidents/:code/help`, no login: name 2–HELP_NAME_MAX characters, phone
+PHONE_MIN_DIGITS–PHONE_MAX_DIGITS digits (optional `+`; spaces, brackets and dashes removed), `kinds` ⊆ HELP_KINDS,
+optional note ≤ HELP_NOTE_MAX, a device id. Anything else → `VALIDATION`. Stored in `help_offers`; the phone number is
+shown only to coordinators. One offer per phone and incident: sending again returns 200 and creates nothing. Log (A)
+"<name> offered to help from the public map" or "<name> joined from the public map".
+
+**BR-171 Who may do what** (`helpOptions`, `shared/communityHelp.ts`), only on incidents visible on the public map
+(BR-80, else `NOT_FOUND`) and not RESOLVED:
+- an approved volunteer may **take** it when no volunteer has it (map status ACTIVE, `helpArranged` false);
+- anyone else may **offer** under the same condition, unless it is opened to anyone;
+- anyone may **join** it directly while it is opened to anyone (BR-172), even when a volunteer is already there.
+An offer on an IN_PROGRESS incident that is not opened → `INVALID_STATE`. The public map shows `helpArranged`
+(status IN_PROGRESS), `openToAll` and the coordinator's `task`, never offers or helpers.
+
+**BR-172 Opened to anyone.** A coordinator (`POST /api/admin/incidents/:id/open {open, task}`) may open an ACTIVE
+incident that is already on the public map (else `INVALID_STATE`) with a public task of 5–PUBLIC_TASK_MAX characters
+(what to do and where to meet; everyone can read it). Joining answers `{status: JOINED, task}`. `open: false` closes
+it again; offers are reviewed from then on. Logs (A). A merge keeps it open if either incident was (BR-50).
+
+**BR-173 Reviewing offers.** Coordinators accept or decline a PENDING offer (else `INVALID_STATE`; compare-and-set).
+Accept: log (A) "Help offer from <name> accepted" and (P) "A helper from the community has been arranged by the
+coordination team"; SMS to the helper (best effort) that the coordinators will call. Decline: log (A); SMS that it is
+covered for now. The dashboard shows the number of pending offers per incident.
+
+**BR-174 A volunteer takes an incident.** `POST /api/volunteer/incidents/:code/take`: the incident must be on the map
+and VERIFIED, with no active assignment, and the volunteer eligible (BR-60); else `NOT_FOUND` / `INVALID_STATE`. It
+becomes their assignment, ACCEPTED at once (BR-101: incident IN_PROGRESS, volunteer BUSY), log (A) "Volunteer <name>
+took this incident from the public map". If two volunteers take it at the same moment, the first assignment wins and
+the other is cancelled with `INVALID_STATE`.
+
+Offers move with a merge (BR-50) and are deleted with their incident by the retention clean-up.
+
 ## B11. Volunteer registration
 
 **BR-150 Volunteer applications (F26):**
@@ -582,6 +623,7 @@ escalates or resolves. Coordinators can cancel any assignment (BR-104), reassign
 | DISPATCH_DEFAULT_RESPONSE_MINUTES / DISPATCH_MAX_RESPONSE_MINUTES (BR-160) | 3 / 30 |
 | DISPATCH_TICK_MS (BR-161) | 15_000 |
 | PUSH_TIMEOUT_MS | 10_000 |
+| HELP_NAME_MAX / HELP_NOTE_MAX / PUBLIC_TASK_MAX (BR-170, BR-172) | 80 / 300 / 200 |
 | POLL_RESOURCES_MS / POLL_RESOURCE_PICKER_MS | 30_000 / 60_000 |
 | POLL_FALLBACK_MS (polling while a live change stream is connected) | 30_000 |
 | STREAM_PING_MS / STREAM_COALESCE_MS / STREAM_RETRY_MS / STREAM_RETRY_MAX_MS | 25_000 / 100 / 3_000 / 30_000 |

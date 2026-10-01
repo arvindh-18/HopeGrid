@@ -1,6 +1,6 @@
 # features.md — Hyperlocal HopeGrid Platform (Hackathon MVP v3)
 
-> **Purpose of this file:** WHAT to build: every feature (`F01`–`F28`), every screen (`S01`–`S13`), acceptance checks, and the demo scenario that proves the product works.
+> **Purpose of this file:** WHAT to build: every feature (`F01`–`F29`), every screen (`S01`–`S13`), acceptance checks, and the demo scenario that proves the product works.
 > **Structure, files, database and API:** see `architecture.md`. **Behaviour rules (`BR-*`) and agent rules (`AR-*`):** see `rules.md`.
 > A feature is done only when every acceptance check passes against the real backend.
 
@@ -14,7 +14,7 @@
 | F02 | Offline outbox & sync | MUST | Victim | offline/outbox.ts, pages/ReportSent.tsx | F01 |
 | F03 | Voice note on report | MUST | Victim | components/VoiceRecorder.tsx | F01 |
 | F04 | Report tracking (code + PIN) | MUST | Victim | pages/Track.tsx, routes/victim.ts, shared/trackingStatus.ts | F06 |
-| F05 | AI structuring (Whisper + local LLM + keyword fallback) | MUST | System | server/ai.ts, server/transcribe.ts, server/pipeline.ts, shared/keywordExtractor.ts | F01, F03 |
+| F05 | AI structuring (speech: IndicConformer + Whisper; local LLM + keyword fallback) | MUST | System | server/ai.ts, server/transcribe.ts, server/pipeline.ts, shared/keywordExtractor.ts, shared/speech.ts | F01, F03 |
 | F06 | Incident creation & lifecycle | MUST | System/Admin | server/pipeline.ts, routes/admin.ts | F05 |
 | F07 | Duplicate detection & merge | MUST | System/Admin | shared/linking.ts, routes/admin.ts | F06 |
 | F08 | Related incidents (cascade) | MUST | System | shared/linking.ts | F06 |
@@ -33,11 +33,12 @@
 | F21 | Fake phone verification (OTP 123456) | SHOULD | Victim | pages/Track.tsx | F04 |
 | F22 | Nearby hazard banner | SHOULD | Community | pages/PublicMap.tsx | F19 |
 | F23 | Demo tools | MUST | Team | Layout.tsx dev buttons, `/api/dev/reset` | — |
-| F24 | Live dictation while speaking (online only) | COULD | Victim | hooks/useLiveDictation.ts | F01 |
+| F24 | ~~Live dictation while speaking~~ (removed 2026-10-01: voice notes are transcribed on the server, BR-12) | — | Victim | — | F01 |
 | F25 | Victim screens in Tamil and Hindi | SHOULD | Victim | src/i18n/ | F01, F02, F06, F19 |
 | F26 | Volunteer self-registration with ID proof | SHOULD | Volunteer, Admin | pages/VolunteerRegister.tsx, pages/admin/Volunteers.tsx, server/routes/applications.ts | F11, F14, F16 |
 | F27 | Reports by SMS without internet (gateway phone) | MUST | Victim, System | shared/sms.ts, lib/sms.ts, ReportSent.tsx, server/routes/sms.ts, server/pipeline.ts | F01, F02, F05 |
 | F28 | Auto-dispatch with SOS to volunteers (app, SMS, push) | SHOULD | Admin, Volunteer, System | shared/dispatch.ts, server/dispatch.ts, server/push.ts, Dashboard.tsx, VolunteerHome.tsx, lib/push.ts | F14, F15, F27 |
+| F29 | Community help from the public map (offer, join, take) | SHOULD | Community, Volunteer, Admin | shared/communityHelp.ts, PublicMap.tsx, routes/public.ts, routes/volunteer.ts, IncidentPage.tsx | F19, F14, F15 |
 
 **Out of scope (do not build):** victim accounts, automatic ID checking (a coordinator looks at the photo), editing an application after sending it, video upload, push notifications other than the F28 SOS, SMS other than F27/F28 (no SMS OTP, no status-update SMS), sending the SMS from inside the app (the phone's own SMS app sends it), real calls or number masking, real emergency-service integration, offline admin/volunteer actions, multiple volunteers on one incident, undo merge, analytics, translating the staff (admin/volunteer) screens.
 
@@ -97,11 +98,14 @@
 **Behaviour:**
 - **Client (offline preview):** S03 runs `keywordExtractor(text)` and shows "Here's what we understood: Flood · 3 people · elderly person · trapped · Evacuation". Label it "Preliminary".
 - **Server:** pipeline steps 1–4 in `architecture.md` §11.2 with rules BR-10…BR-13.
+- **Speech (BR-12):** Whisper guesses the language; Tamil and Hindi go to AI4Bharat IndicConformer, English to NVIDIA Parakeet, other languages to Whisper. The app's language breaks ties. The local AI writes the English version of Tamil and Hindi.
 - **Admin view:** each report shows the original text, transcript (if any), audio player, extraction, and source badge "AI" or "Keywords".
 **Acceptance:**
 - [ ] Demo sentence 1 ("Water has entered our house. My grandmother cannot walk and we are stuck on the second floor. The road outside is completely flooded.") → type FLOOD, vulnerable true, trapped true, danger true, needs include EVACUATION. Must pass with **both** AI and keywords.
 - [ ] AI model unavailable (e.g. removed from `models/`) → new reports still create incidents with source "Keywords".
 - [ ] Whisper failure → report still becomes an incident; admin sees "🎤 Voice note could not be transcribed — listen".
+- [ ] A Tamil voice note is transcribed in Tamil script by IndicConformer and gets an "English:" line, even when the app is set to English; the same for Hindi.
+- [ ] IndicConformer or Parakeet model files removed from `models/` → those voice notes are still transcribed, by Whisper.
 
 ### F06 — Incident creation & lifecycle
 **Goal:** every processed report becomes an incident; incidents move through statuses.
@@ -245,12 +249,12 @@
 **Behaviour:** in DEV builds, Layout shows a small floating "Demo" menu with "Reset demo data" (calls `/api/dev/reset`, server `DEV_MODE` only) and "Simulate offline".
 **Acceptance:** [ ] "Reset demo data" restores the §12 seed via the server.
 
-### F24 — Live dictation (optional)
-**Behaviour:** if `SpeechRecognition` exists and the device is online, show a small "✍️ Live text" toggle next to the mic; recognized words are appended to the description while recording (starts in the app's language: `en-IN`, `ta-IN` or `hi-IN`, with a switch). The recorded voice note is still attached. Hide entirely when unsupported or offline.
+### F24 — Live dictation (removed 2026-10-01)
+**Removed.** It used the browser's speech recognition (Google's servers, internet only, usually missing in the Android app). Voice notes are transcribed on the server by the engines in BR-12 instead.
 **Acceptance:** [ ] Absence of this feature never breaks F03.
 
 ### F25 — Regional languages (Tamil, Hindi)
-**Behaviour:** a language picker (English / தமிழ் / हिन्दी) in the header of every public page. The choice is saved on the device; the first visit follows the browser language. Home, Report, Report sent, Track, Safety map and the victim chat are translated, including server update lines, map advice and common error messages (translated on the phone from the known English text). Admin and volunteer screens always stay English. Voice notes in any Whisper-supported Indian language are transcribed and also translated to English for the AI (BR-12); typed Hindi is understood by the keyword fallback (BR-10).
+**Behaviour:** a language picker (English / தமிழ் / हिन्दी) in the header of every public page. The choice is saved on the device; the first visit follows the browser language. Home, Report, Report sent, Track, Safety map and the victim chat are translated, including server update lines, map advice and common error messages (translated on the phone from the known English text). Admin and volunteer screens always stay English. Voice notes are transcribed in the language spoken and also get an English version for the AI (BR-12): Tamil and Hindi by AI4Bharat IndicConformer, English by NVIDIA Parakeet, other Whisper-supported languages by Whisper. The app sends its language with the report as a hint; typed Hindi is understood by the keyword fallback (BR-10).
 **Acceptance:**
 - [ ] Choosing தமிழ் or हिन्दी changes every victim screen with no English left, and survives a reload.
 - [ ] Admin pages stay English on a device set to Tamil.
@@ -308,12 +312,37 @@ a volunteer must answer quickly, even with the app closed.
 - [ ] With a real Firebase project: an SOS notification arrives on a phone with the app closed. **TODO: needs verification.**
 - [ ] The SOS screen on a real volunteer phone. **TODO: needs verification.**
 
+### F29 — Community help from the public map
+**Goal:** people who see a hazard on the map can help, without unchecked strangers being sent to vulnerable people.
+**Behaviour** (BR-170…BR-174):
+1. S05, the selected hazard's card has "Can you help?":
+   - **Approved volunteer** (logged in): "I'll go: take this" → confirm → it becomes their accepted assignment.
+   - **Anyone else:** "Offer help" → name, phone, what they can bring (physical help, vehicle, boat, first aid, food
+     or water, shelter, other), note → "A coordinator will call you if your help is needed."
+   - **Opened to anyone:** the card shows "Help needed: <task>" and "Join to help"; joining shows the task again.
+   - "A volunteer is already helping here" once someone has it; a safety line on every help action.
+   - Works in map and list view. Name and phone are remembered on the phone for the next offer. Tamil and Hindi.
+2. S08 incident page, "Community help": "Let anyone join from the map" with the public task, or "Stop"; offers
+   waiting (name, phone to call, what they bring, note) with Accept / Decline; the helpers so far.
+3. S07 dashboard: "🙋 N offers of help". S09: "Find hazards that need help on the map" when available with nothing
+   to do.
+**Acceptance:**
+- [x] Offers only on incidents on the map; one per phone; the public feed never contains names or phones (API tests).
+- [x] Accept / decline with SMS to the helper; the reporter sees "A helper from the community has been arranged"
+      but not who (API tests).
+- [x] Open to anyone only when on the map and with a task; joining works even with a volunteer there (API tests).
+- [x] A volunteer takes an unassigned hazard (accepted, busy, in progress); a second volunteer or a hazard already
+      offered to someone is refused, and nothing is created (API tests).
+- [x] Offers move with a merge and go with the clean-up (API tests).
+- [x] Offer and join flows in headless Chrome at phone size against a stand-in API (2026-10-01).
+- [ ] On real devices with the live database. **TODO: needs verification.**
+
 ## 3. Screens
 
 | ID | Route | Screen | User | Features |
 |---|---|---|---|---|
 | S01 | `/` | Home | Everyone | F01, F02 |
-| S02 | `/report` | Report | Victim | F01, F03, F24 |
+| S02 | `/report` | Report | Victim | F01, F03 |
 | S03 | `/report/sent/:id` | Report sent | Victim | F02, F05 (preview), F27 (send by SMS) |
 | S04 | `/track` | Track | Victim | F04, F17, F21 |
 | S05 | `/map` | Public map | Community | F19, F22 |

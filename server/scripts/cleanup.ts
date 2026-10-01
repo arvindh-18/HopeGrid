@@ -26,6 +26,7 @@ export interface CleanupPlan {
   messages: string[];
   allocations: string[];
   logs: string[];
+  helpOffers: string[]; // F29
   media: string[];
   /** Kept incidents whose possible_duplicate_of / merged_into point at a deleted one (set to null first). */
   unlink: { id: string; column: 'possible_duplicate_of' | 'merged_into' }[];
@@ -37,15 +38,16 @@ export async function planCleanup(olderThanDays: number, now = new Date()): Prom
   const cutoff = new Date(now.getTime() - olderThanDays * 86_400_000).toISOString();
   const closed = await rows(db.from('incidents').select('id, updated_at').in('status', CLOSED), 'Incident lookup failed');
   const incidents = ids(closed.filter((i) => new Date(i.updated_at as string).toISOString() < cutoff));
-  const empty: CleanupPlan = { cutoff, incidents, reports: [], assignments: [], messages: [], allocations: [], logs: [], media: [], unlink: [] };
+  const empty: CleanupPlan = { cutoff, incidents, reports: [], assignments: [], messages: [], allocations: [], logs: [], helpOffers: [], media: [], unlink: [] };
   if (incidents.length === 0) return empty;
 
-  const [reports, assignments, messages, allocations, logs, others] = await Promise.all([
+  const [reports, assignments, messages, allocations, logs, helpOffers, others] = await Promise.all([
     rows(db.from('reports').select('id, photo_path, audio_path').in('incident_id', incidents), 'Report lookup failed'),
     rows(db.from('assignments').select('id').in('incident_id', incidents), 'Assignment lookup failed'),
     rows(db.from('messages').select('id, audio_path').in('incident_id', incidents), 'Message lookup failed'),
     rows(db.from('allocations').select('id').in('incident_id', incidents), 'Allocation lookup failed'),
     rows(db.from('incident_logs').select('id').in('incident_id', incidents), 'Log lookup failed'),
+    rows(db.from('help_offers').select('id').in('incident_id', incidents), 'Help offer lookup failed'),
     rows(db.from('incidents').select('id, possible_duplicate_of, merged_into'), 'Incident lookup failed'),
   ]);
   const doomed = new Set(incidents);
@@ -58,11 +60,13 @@ export async function planCleanup(olderThanDays: number, now = new Date()): Prom
   const media = [...reports.flatMap((r) => [r.photo_path, r.audio_path]), ...messages.map((m) => m.audio_path)].filter((p): p is string => !!p);
   return {
     ...empty,
-    reports: ids(reports), assignments: ids(assignments), messages: ids(messages), allocations: ids(allocations), logs: ids(logs), media, unlink,
+    reports: ids(reports), assignments: ids(assignments), messages: ids(messages), allocations: ids(allocations), logs: ids(logs),
+    helpOffers: ids(helpOffers), media, unlink,
   };
 }
 
-/** Deletes a plan in foreign-key order: messages → assignments → allocations → logs → media → reports → incidents. */
+/** Deletes a plan in foreign-key order: messages → assignments → allocations → logs → help offers → media → reports →
+ * incidents. */
 export async function applyCleanup(plan: CleanupPlan): Promise<void> {
   const del = async (table: string, list: string[]) => {
     for (let i = 0; i < list.length; i += 200) {
@@ -74,6 +78,7 @@ export async function applyCleanup(plan: CleanupPlan): Promise<void> {
   await del('assignments', plan.assignments);
   await del('allocations', plan.allocations);
   await del('incident_logs', plan.logs);
+  await del('help_offers', plan.helpOffers);
   await removeFiles(plan.media);
   await del('reports', plan.reports);
   for (const u of plan.unlink) {
