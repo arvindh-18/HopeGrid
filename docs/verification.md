@@ -55,7 +55,7 @@ models, so the wiring is copied and must be kept in sync.
 
 ---
 
-## 3. What is covered (all 151 tests)
+## 3. What is covered (all 155 tests)
 
 ### API integration tests (87)
 **Report submission (F01, BR-02, BR-03)**
@@ -267,8 +267,10 @@ backup.
 | M41 — a translation identical to the original is kept | 1: the BR-12 unit test |
 | M42 — language detection decodes the whole voice note (no quick mode) | 6 of the 8 routing tests |
 | M43 — the local AI is asked to translate any language | 1: the other-language test |
+| M44 — a coordinator's Assign no longer notifies the volunteer (BR-167) | 1: the manual-assign API test |
+| M45 — pushes sent without the `help_requests` channel | 2: the SOS push and manual-assign API tests |
 
-Result: **43 of 43 breaks caught** (M23 and M30 on the second run). M33–M43 (2026-10-01) were run with the full suite by a script that restores each file; the suite then passed 151/151. Apart from M7's knock-on failures, only the intended tests failed each time.
+Result: **45 of 45 breaks caught** (M23 and M30 on the second run). M33–M43 (2026-10-01) were run with the full suite by a script that restores each file; the suite then passed 151/151. M44–M45 (2026-10-01) were run on the API tests and the files restored; the full suite then passed 155/155. Apart from M7's knock-on failures, only the intended tests failed each time.
 M17–M21 (2026-09-30) were run with the full suite by a script that restores each file afterwards; the suite passed 114/114 after the last restore. M14–M16 (2026-09-30) were checked with the volunteer-registration group only (`vitest run tests/integration -t "Volunteer registration"`); the restored files were compared byte-for-byte with the backups.
 
 ---

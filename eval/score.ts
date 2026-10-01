@@ -1,6 +1,7 @@
 // eval/score.ts — shared scoring for eval/run.ts and eval/prompt-experiment.ts: field-by-field comparison of an
 // Extraction with the hand-written expected values, per language and overall.
 import { readFileSync } from 'node:fs';
+import { computePriority } from '../shared/scoring';
 import type { Extraction, Need } from '../shared/types';
 
 export type Expected = Pick<Extraction, 'type' | 'people' | 'vulnerable' | 'mobilityIssue' | 'trapped' | 'medical' | 'danger' | 'needs'>;
@@ -72,3 +73,45 @@ export const percentile = (xs: number[], p: number) => {
   const s = [...xs].sort((a, b) => a - b);
   return s[Math.min(s.length - 1, Math.ceil((p / 100) * s.length) - 1)];
 };
+
+// ------------------------------------------------------------------ false positives and false negatives
+
+export const FLAGS = ['trapped', 'medical', 'vulnerable', 'mobilityIssue', 'danger'] as const;
+export interface Confusion { n: number; tp: number; fp: number; fn: number; tn: number; falseAlarmRate: number; missRate: number; precision: number; recall: number; fpIds: string[]; fnIds: string[] }
+
+function confusion(items: { id: string; truth: boolean; pred: boolean }[]): Confusion {
+  const ids = (t: boolean, p: boolean) => items.filter((i) => i.truth === t && i.pred === p).map((i) => i.id);
+  const tp = ids(true, true).length, fp = ids(false, true).length, fn = ids(true, false).length, tn = ids(false, false).length;
+  return {
+    n: items.length, tp, fp, fn, tn,
+    falseAlarmRate: fp / (fp + tn || 1), // of the reports where it is false, how many the AI flagged anyway
+    missRate: fn / (fn + tp || 1),       // of the reports where it is true, how many the AI missed
+    precision: tp / (tp + fp || 1), recall: tp / (tp + fn || 1),
+    fpIds: ids(false, true), fnIds: ids(true, false),
+  };
+}
+
+/** The priority level the incident would get from these facts alone (BR-25…BR-27; vulnerable = vulnerable OR mobility). */
+const levelOf = (e: Expected) => computePriority({ type: e.type, people: e.people, vulnerable: e.vulnerable || e.mobilityIssue, trapped: e.trapped, medical: e.medical, danger: e.danger }).level;
+
+/** False positives / negatives for each safety flag, and for the priority the incident would get (Critical; High or Critical). */
+export function errorRates(rows: Scored[], cases: Case[]) {
+  const exp = (id: string) => cases.find((c) => c.id === id)!.expected;
+  const flags = Object.fromEntries(FLAGS.map((f) => [f, confusion(rows.map((r) => ({ id: r.id, truth: exp(r.id)[f], pred: r.pred[f] })))])) as Record<(typeof FLAGS)[number], Confusion>;
+  const level = (want: string[]) => confusion(rows.map((r) => ({ id: r.id, truth: want.includes(levelOf(exp(r.id))), pred: want.includes(levelOf(r.pred)) })));
+  return { flags, critical: level(['CRITICAL']), urgent: level(['CRITICAL', 'HIGH']) };
+}
+
+export function printErrors(title: string, e: ReturnType<typeof errorRates>) {
+  const pct = (x: number) => `${Math.round(100 * x)}%`;
+  const row = (label: string, c: Confusion) =>
+    `| ${label} | ${c.tp + c.fn} / ${c.n} | ${c.fp} | ${c.fn} | ${pct(c.falseAlarmRate)} | ${pct(c.missRate)} | ${c.precision.toFixed(2)} | ${c.recall.toFixed(2)} |`;
+  console.log(`\n### ${title}: false positives and false negatives\n`);
+  console.log('| What | really true | false positives | false negatives | false-alarm rate | miss rate | precision | recall |');
+  console.log('|---|---|---|---|---|---|---|---|');
+  for (const f of FLAGS) console.log(row(f, e.flags[f]));
+  console.log(row('priority Critical', e.critical));
+  console.log(row('priority High or Critical', e.urgent));
+  for (const f of FLAGS) if (e.flags[f].fn) console.log(`  missed ${f}: ${e.flags[f].fnIds.join(', ')}`);
+  if (e.critical.fn) console.log(`  missed Critical: ${e.critical.fnIds.join(', ')}`);
+}

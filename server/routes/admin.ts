@@ -18,7 +18,7 @@ import {
 } from '../pipeline';
 import { checkPublicTask } from '../../shared/communityHelp';
 import { isPublic } from '../../shared/publicView';
-import { createAssignment, dispatchState, runDispatch, saveDispatchSettings } from '../dispatch';
+import { createAssignment, dispatchState, notifyAssigned, runDispatch, saveDispatchSettings } from '../dispatch';
 import { sendSms } from '../smsGateway';
 import { openStream } from '../events';
 import { removeFiles, signedUrls } from '../storage';
@@ -333,8 +333,9 @@ adminRouter.post('/incidents/:id/assign', async (req, res) => {
     : [];
   if (!v) throw new ApiError('NOT_FOUND', 'This volunteer does not exist.');
   if (!isEligible(v, i.id, assignments)) throw new ApiError('INVALID_STATE', `${v.name} is not available for this incident.`);
-  await createAssignment(i, v, null);
+  const a = await createAssignment(i, v, null);
   await addLog(i.id, `Volunteer ${v.name} assigned`, false);
+  void notifyAssigned(v, i, a).catch((e) => console.warn(`Could not notify ${v.name}: ${e instanceof Error ? e.message : e}`)); // BR-167
   // A coordinator chose this volunteer: a person has judged the incident (BR-165), so it may reach the public map.
   await updateIncident(i.id, i.autoDispatchedAt ? { autoDispatchedAt: null } : {});
   res.json(await detail(i.id));

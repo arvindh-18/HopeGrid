@@ -152,4 +152,13 @@ describe('BR-12 speech routing (server/transcribe.ts)', () => {
     state.whisperText = '  ';
     await expect(hear()).rejects.toThrow('No speech recognised');
   });
+
+  it("treats Whisper's silence marker as nothing heard, not as a transcript", async () => {
+    state.detected = 'en';
+    state.parakeet = '';
+    state.whisperText = '[BLANK_AUDIO]';
+    await expect(hear()).rejects.toThrow('No speech recognised');
+    state.whisperText = '[MUSIC] Help, water is rising';
+    expect(await hear()).toMatchObject({ text: 'Help, water is rising', engine: 'WHISPER' });
+  });
 });

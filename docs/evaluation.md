@@ -72,6 +72,45 @@ per report in this run: 6.6 s (main) and 5.6 s (held-out), while other work was 
 - **Neither system gets every field right for most reports** (28% and 18%). In HopeGrid, the coordinator reviews
   every incident, and the victim's own answers on the form (people, needs) override the AI.
 
+### 2.6 False positives and false negatives (English, 79 reports, 2026-10-01)
+
+A **false positive** is a false alarm (the AI says "trapped" when nobody is). A **false negative** is a miss (someone is
+trapped and the AI says not). Measured on a new English-only set, `eval/english.jsonl` (79 reports written and
+labelled before any model saw them, by the guide in `eval/README.md`; `eval/make-english.py` writes it). It has 18
+reports with someone trapped, 23 medical, 29 vulnerable, 10 who cannot move, 40 dangerous, and tricky negatives such as
+"nobody is hurt", "3 dogs stuck on a roof" and an injected instruction. Command: `npx tsx eval/run.ts --data english`.
+
+False-alarm rate = false positives ÷ reports where it is really false. Miss rate = false negatives ÷ reports where it is
+really true. The priority rows use the app's own rules (BR-25…BR-27) on the AI's facts alone, without the reporter's
+form answers.
+
+| | Really true | AI: false alarms | AI: misses | AI false-alarm rate | AI miss rate | Keywords only: false-alarm / miss |
+|---|---|---|---|---|---|---|
+| Trapped | 18 of 79 | 10 | **0** | 16% | **0%** | 8% / 22% |
+| Medical | 23 | 0 | 2 | 0% | 9% | 5% / 48% |
+| Vulnerable | 29 | 4 | 5 | 8% | 17% | 0% / 31% |
+| Cannot move | 10 | 1 | **0** | 1% | **0%** | 0% / 40% |
+| Danger | 40 | 5 | 8 | 13% | 20% | 0% / 57% |
+| Priority Critical | 12 | 10 | 3 | 15% | 25% | 3% / 50% |
+| Priority High or Critical | 36 | 4 | 4 | 9% | 11% | 2% / 61% |
+
+Also from this run: type right 57/79 (72%); needs precision 0.70, recall 0.64; no fallbacks to keywords; median
+4.9 s per report. Duplicate detection on the 24 labelled pairs: 4 false positives, 5 false negatives (§5).
+
+What the mistakes look like:
+- **It leans towards caution.** It never missed a trapped person or someone who cannot move. Its trapped false
+  alarms are reports like "we cannot take the car out", "we cannot carry her" and "3 dogs stuck on a roof". These
+  false alarms are also why Critical has 10 false alarms.
+- **No truly critical report fell below High.** The 3 missed Criticals are floods where people are stuck: the AI
+  chose "People trapped" instead of "Flood", and in two it missed that children were involved. All three were rated
+  High. The 4 urgent misses were High reports rated Medium.
+- **Medical misses:** a broken leg in a flood, and a pregnancy (labelled medical by the guide).
+- **Keywords alone miss far more** (half of the Critical reports) but raise fewer false alarms: the AI is worth it.
+- Limits: synthetic, author-written English; one labeller, and a few labels are judgement calls (for example, a
+  bedridden grandmother "we cannot carry"). 79 reports, so one report moves a rate by 3–10 points.
+- In the app, a coordinator verifies every incident before it goes public, the reporter's own form answers override
+  the AI's, and a coordinator can change any priority with a reason.
+
 ## 3. A bias found, and what was tried
 
 **Finding.** 10 of the AI's 17 type errors on the main set were `HEAVY_RAIN`, including for a fever, chest pain, a

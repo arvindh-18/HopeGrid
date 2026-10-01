@@ -76,7 +76,15 @@ const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
 app.use(errorHandler);
 
 const port = Number(process.env.PORT) || 3000;
-app.listen(port, () => {
+app.listen(port, (error?: Error) => {
+  // Express 5 calls this even when listening failed: stop before loading models or touching reports.
+  if (error) {
+    const busy = (error as NodeJS.ErrnoException).code === 'EADDRINUSE';
+    console.error(busy
+      ? `Port ${port} is already in use: HopeGrid (or another program) is already running there. Stop it first, or set PORT.`
+      : `Could not start the server on port ${port}: ${error.message}`);
+    process.exit(1);
+  }
   console.log(`HopeGrid server on http://localhost:${port}${process.env.DEV_MODE === 'true' ? ' (DEV_MODE)' : ''}`);
   // Load the local AI and speech models once (if `npm run setup-ai` installed them), then process every report
   // still PENDING (D9: nothing is lost on restart). Without a model each report falls back (BR-11, BR-12).

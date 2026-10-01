@@ -9,7 +9,7 @@ import { encodeSmsReport, parseSmsReport } from '../shared/sms';
 import { checkHelpOffer, checkPublicTask, helpOptions } from '../shared/communityHelp';
 import { cleanTranslation, isSpeechLang, speechEngine, speechLanguage } from '../shared/speech';
 import {
-  checkDispatchSettings, expiredOffers, incidentsToDispatch, parseVolunteerReply, sosPush, sosSms, sosSummary, waitingIncidents,
+  assignedPush, assignedSms, checkDispatchSettings, expiredOffers, incidentsToDispatch, parseVolunteerReply, sosPush, sosSms, sosSummary, waitingIncidents,
 } from '../shared/dispatch';
 import { humanize } from '../shared/volunteerMatch';
 import { DEMO_CENTER, SMS_LOCATION_MAX_CHARS, SMS_TEXT_MAX_CHARS } from '../shared/constants';
@@ -379,6 +379,13 @@ describe('F28 auto-dispatch rules (BR-160…BR-164)', () => {
     expect(summary).toBe('Flood, Critical priority, 3 people, trapped, vulnerable person at Canal Road, near the temple, 1.2 km away');
     expect(sosSms(i, summary, 3)).toBe(`HopeGrid SOS #WF22W: ${summary}. Reply YES WF22W to accept or NO WF22W to decline within 3 min.`);
     expect(sosPush(i, summary, 3)).toEqual({ title: 'SOS #WF22W: help needed', body: `${summary}. Accept or decline within 3 min.` });
+  });
+
+  it("tells a volunteer about a coordinator's assignment the same way, without a deadline (BR-167)", () => {
+    const i = { code: 'WF22W', type: 'FLOOD' as const, priority: 'HIGH' as const, people: 2, trapped: false, medical: true, vulnerable: false, locationText: 'Canal Road' };
+    const summary = sosSummary(i, null, humanize);
+    expect(assignedSms(i, summary)).toBe(`HopeGrid: new request #WF22W: ${summary}. Reply YES WF22W to accept or NO WF22W to decline, or open the app.`);
+    expect(assignedPush(i, summary)).toEqual({ title: 'New help request #WF22W', body: `${summary}. Open HopeGrid to accept or decline.` });
   });
 });
 

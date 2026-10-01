@@ -16,7 +16,7 @@ import { api } from '../../data';
 import { useAuth } from '../../hooks/useAuth';
 import { usePoll } from '../../hooks/usePoll';
 import { formatDistance, getPosition } from '../../lib/geo';
-import { startPush } from '../../lib/push';
+import { startPush, type PushState } from '../../lib/push';
 import { distanceBetween } from '../../../shared/linking';
 import {
   AVAILABILITY_LABEL, EQUIPMENT_LABEL, NEED_LABEL, SKILL_LABEL, TYPE_ICON, TYPE_LABEL, UNABLE_LABEL, VEHICLE_LABEL,
@@ -36,12 +36,18 @@ export default function VolunteerHome() {
   const current = asg.data?.find((a) => ACTIVE_ASSIGNMENT.includes(a.status) && a.status !== 'ASSIGNED') ?? null;
   const recent = asg.data?.filter((a) => !ACTIVE_ASSIGNMENT.includes(a.status)) ?? [];
 
-  // F28: SOS notifications while the app is closed (Android app with Firebase only). The token goes to the server.
+  // F28, BR-167: notifications while the app is closed (Android app with Firebase only). The token goes to the server.
+  const [pushState, setPushState] = useState<PushState>('UNAVAILABLE');
+  const [pushTry, setPushTry] = useState(0);
   useEffect(() => {
     let stop: (() => void) | undefined;
-    void startPush((token) => void api.registerPushToken(token).catch(() => {}), (path) => navigate(path)).then((s) => { stop = s; });
+    void startPush(
+      (token) => void api.registerPushToken(token).catch(() => {}),
+      (path) => navigate(path),
+      () => void asg.refresh(), // arrived while the app is open: show the request now (the "New help request" alert follows)
+    ).then((r) => { stop = r.stop; setPushState(r.state); });
     return () => stop?.();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [pushTry]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // F28: an auto-dispatched request covers the screen until it is accepted or declined.
   const sos = offers.find((o) => o.auto && o.respondBy) ?? null;
@@ -113,6 +119,13 @@ export default function VolunteerHome() {
               </div>
               <Toggle label="Available for requests" checked={p.availability !== 'OFFLINE'} disabled={p.availability === 'BUSY'} onChange={setAvailable} />
             </section>
+
+            {pushState === 'OFF' && (
+              <Notice tone="warning" action={<Button variant="outline" size="sm" onClick={() => setPushTry((n) => n + 1)}>Try again</Button>}>
+                <b>Notifications are off</b>, so new requests won't reach you while the app is closed. Turn them on in
+                Settings → Apps → HopeGrid → Notifications, then tap Try again.
+              </Notice>
+            )}
 
             {offers.map((a) => (
               <section key={a.id} className="card overflow-hidden ring-2 ring-ink" aria-labelledby={`offer-${a.id}`}>

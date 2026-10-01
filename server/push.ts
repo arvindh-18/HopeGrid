@@ -4,7 +4,7 @@
 // from the service account with node:crypto, so the server needs no Firebase package.
 import { createSign } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { PUSH_TIMEOUT_MS } from '../shared/constants';
+import { PUSH_CHANNEL, PUSH_TIMEOUT_MS } from '../shared/constants';
 
 interface ServiceAccount { project_id: string; client_email: string; private_key: string; token_uri?: string }
 export type PushResult = 'SENT' | 'NOT_CONFIGURED' | 'INVALID_TOKEN' | 'FAILED';
@@ -69,7 +69,11 @@ export async function sendPush(token: string, n: { title: string; body: string; 
           token,
           notification: { title: n.title, body: n.body },
           data: n.data ?? {},
-          android: { priority: 'HIGH', notification: { sound: 'default' } },
+          // High priority, on the app's "Help requests" channel, so it pops up with sound even when the app is closed.
+          android: {
+            priority: 'HIGH',
+            notification: { sound: 'default', channel_id: PUSH_CHANNEL, notification_priority: 'PRIORITY_MAX', default_vibrate_timings: true, visibility: 'PUBLIC' },
+          },
         },
       }),
       signal: AbortSignal.timeout(PUSH_TIMEOUT_MS),

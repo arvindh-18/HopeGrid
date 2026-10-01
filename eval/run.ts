@@ -1,14 +1,14 @@
 // eval/run.ts — accuracy of the keyword extractor (BR-10) and of the local LLM path exactly as the server runs it
 // (server/ai.ts structureText, BR-11) on a labelled report set, and precision/recall of duplicate detection (BR-40)
 // on eval/duplicate-pairs.jsonl. All data is synthetic and author-written (see eval/README.md).
-// Usage: npx tsx eval/run.ts [--data reports|heldout] [--no-llm]
+// Usage: npx tsx eval/run.ts [--data reports|heldout|english] [--no-llm]
 import { mkdirSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { DEMO_CENTER } from '../shared/constants';
 import { keywordExtractor } from '../shared/keywordExtractor';
 import { findDuplicate, type LinkIncident } from '../shared/linking';
 import type { IncidentType } from '../shared/types';
-import { compare, GROUPS, percentile, printTable, readJsonl, summarise, type Case, type Scored } from './score';
+import { compare, errorRates, GROUPS, percentile, printErrors, printTable, readJsonl, summarise, type Case, type Scored } from './score';
 
 interface Side { type: IncidentType; text: string; north_m?: number; east_m?: number; noCoords?: boolean }
 interface Pair { id: string; duplicate: boolean; scenario: string; minutesApart: number; a: Side; b: Side }
@@ -33,7 +33,9 @@ async function main() {
   });
   const kwSummary = summarise(kw, cases);
   printTable('Keyword extractor (BR-10)', kwSummary);
-  out.keyword = { summary: kwSummary, cases: kw };
+  const kwErrors = errorRates(kw, cases);
+  printErrors('Keyword extractor', kwErrors);
+  out.keyword = { summary: kwSummary, errors: kwErrors, cases: kw };
 
   // (b) local LLM through server/ai.ts, exactly as the pipeline calls it (falls back to keywords on any error)
   if (process.argv.includes('--no-llm')) {
@@ -63,10 +65,12 @@ async function main() {
       const ms = llm.map((r) => r.ms!);
       const fallbacks = llm.filter((r) => r.source !== 'AI').map((r) => r.id);
       printTable(`Local LLM path (server/ai.ts, ${process.env.AI_MODEL || 'Qwen 2.5 3B Instruct Q4_K_M'})`, s);
+      const llmErrors = errorRates(llm, cases);
+      printErrors('Local LLM path', llmErrors);
       const timing = { modelLoadMs: Math.round(loadMs), perReportMs: { median: Math.round(percentile(ms, 50)), p90: Math.round(percentile(ms, 90)), max: Math.round(Math.max(...ms)), first: Math.round(ms[0]) } };
       console.log(`Fell back to keywords: ${fallbacks.length}/${llm.length}${fallbacks.length ? ` (${fallbacks.join(', ')})` : ''}`);
       console.log(`Timing: model load ${timing.modelLoadMs} ms; per report median ${timing.perReportMs.median} ms, p90 ${timing.perReportMs.p90} ms, max ${timing.perReportMs.max} ms (first ${timing.perReportMs.first} ms)`);
-      out.llm = { model: process.env.AI_MODEL || 'hf:Qwen/Qwen2.5-3B-Instruct-GGUF:Q4_K_M', summary: s, fallbacks, timing, cases: llm };
+      out.llm = { model: process.env.AI_MODEL || 'hf:Qwen/Qwen2.5-3B-Instruct-GGUF:Q4_K_M', summary: s, errors: llmErrors, fallbacks, timing, cases: llm };
     }
   }
 

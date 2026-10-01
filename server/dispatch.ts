@@ -4,8 +4,8 @@
 // Rules come from shared/dispatch.ts and shared/volunteerMatch.ts; this file only reads, writes and notifies.
 import { DISPATCH_TICK_MS } from '../shared/constants';
 import {
-  DEFAULT_DISPATCH, checkDispatchSettings, expiredOffers, incidentsToDispatch, parseVolunteerReply, sosPush, sosSms,
-  sosSummary, waitingIncidents,
+  DEFAULT_DISPATCH, assignedPush, assignedSms, checkDispatchSettings, expiredOffers, incidentsToDispatch, parseVolunteerReply,
+  sosPush, sosSms, sosSummary, waitingIncidents,
 } from '../shared/dispatch';
 import { distanceBetween, formatDistance } from '../shared/linking';
 import { effectivePriority } from '../shared/scoring';
@@ -185,16 +185,32 @@ export async function answerBySms(from: string, text: string): Promise<{ reply: 
 
 // ---------------------------------------------------------------- the dispatcher (BR-160…BR-162, BR-164)
 
-/** SOS by SMS and push. Best effort: the in-app SOS and the deadline work without either. */
-async function notifyVolunteer(v: ProfileRecord, i: IncidentRecord, a: AssignmentRecord, minutes: number): Promise<void> {
+/** What a request is about, for SMS and push: type, priority, people and flags, place and distance from the volunteer. */
+function requestSummary(v: ProfileRecord, i: IncidentRecord) {
   const m = distanceBetween(i, v);
   const source = { ...i, priority: effectivePriority(i.priority, i.priorityOverride) };
-  const summary = sosSummary(source, m === null ? null : formatDistance(m), humanize);
-  if (v.phone) await sendSms(v.phone, sosSms(source, summary, minutes));
+  return { source, summary: sosSummary(source, m === null ? null : formatDistance(m), humanize) };
+}
+
+/** SMS (if the volunteer has a phone) and push (if their app registered). Best effort: the app shows the request anyway. */
+async function tellVolunteer(v: ProfileRecord, a: AssignmentRecord, sms: string, push: { title: string; body: string }): Promise<void> {
+  if (v.phone) await sendSms(v.phone, sms);
   if (v.pushToken) {
-    const result = await sendPush(v.pushToken, { ...sosPush(source, summary, minutes), data: { assignmentId: a.id, path: '/volunteer' } });
+    const result = await sendPush(v.pushToken, { ...push, data: { assignmentId: a.id, path: '/volunteer' } });
     if (result === 'INVALID_TOKEN') await db.from('profiles').update({ push_token: null }).eq('id', v.id);
   }
+}
+
+/** SOS by SMS and push (BR-164). */
+async function notifyVolunteer(v: ProfileRecord, i: IncidentRecord, a: AssignmentRecord, minutes: number): Promise<void> {
+  const { source, summary } = requestSummary(v, i);
+  await tellVolunteer(v, a, sosSms(source, summary, minutes), sosPush(source, summary, minutes));
+}
+
+/** BR-167: a coordinator's assignment reaches the volunteer the same ways, without a deadline. */
+export async function notifyAssigned(v: ProfileRecord, i: IncidentRecord, a: AssignmentRecord): Promise<void> {
+  const { source, summary } = requestSummary(v, i);
+  await tellVolunteer(v, a, assignedSms(source, summary), assignedPush(source, summary));
 }
 
 /** BR-162: an SOS not answered in time counts as declined; the incident goes back to the queue for the next volunteer. */

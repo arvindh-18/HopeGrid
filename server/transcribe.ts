@@ -213,6 +213,8 @@ export interface Transcript {
 }
 
 const clean = (s: string) => s.replace(/\s+/g, ' ').trim();
+/** Whisper marks non-speech with tags like [BLANK_AUDIO] or [MUSIC]: drop them, so silence counts as nothing heard. */
+const spoken = (s: string) => clean(s.replace(/\[[^\]]*\]/g, ' '));
 
 /**
  * Download a voice note from Storage and transcribe it (transcribeAudio). `hint` is the language the person used the
@@ -305,7 +307,7 @@ export async function transcribeAudio(audio: Buffer, ext: string, hint: SpeechLa
     if (!context) throw notInstalled('Speech model');
     const heard = await exclusive(() => whisperPass(context, pcm, { language: language ?? 'auto', translate: false }, remaining));
     if (heard.isAborted) throw new Error('Transcription timed out');
-    text = clean(heard.result);
+    text = spoken(heard.result);
     language ??= heard.language || null;
   }
   if (!text) throw new Error('No speech recognised');
@@ -319,7 +321,7 @@ export async function transcribeAudio(audio: Buffer, ext: string, hint: SpeechLa
   if (!english && context) {
     const translated = await exclusive(() => whisperPass(context, pcm, { language, translate: true }, remaining))
       .catch((e) => { console.warn(`Translation to English failed: ${message(e)}`); return null; });
-    const heard = translated && !translated.isAborted ? clean(translated.result) : '';
+    const heard = translated && !translated.isAborted ? spoken(translated.result) : '';
     english = heard && heard !== text ? heard : null;
   }
   return { text, language, english, engine };

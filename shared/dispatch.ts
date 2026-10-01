@@ -109,3 +109,11 @@ export const sosSms = (i: SosSource, summary: string, minutes: number): string =
 /** BR-164: the push notification. Tapping it opens the volunteer screen with the SOS. */
 export const sosPush = (i: SosSource, summary: string, minutes: number): { title: string; body: string } =>
   ({ title: `SOS #${i.code}: help needed`, body: `${summary}. Accept or decline within ${minutes} min.` });
+
+/** BR-167: a coordinator assigned this volunteer (no deadline). The SMS answer works like an SOS answer (BR-163). */
+export const assignedSms = (i: SosSource, summary: string): string =>
+  `HopeGrid: new request #${i.code}: ${summary}. Reply YES ${i.code} to accept or NO ${i.code} to decline, or open the app.`;
+
+/** BR-167: the push notification for a coordinator's assignment. Tapping it opens the volunteer screen. */
+export const assignedPush = (i: SosSource, summary: string): { title: string; body: string } =>
+  ({ title: `New help request #${i.code}`, body: `${summary}. Open HopeGrid to accept or decline.` });

@@ -54,8 +54,8 @@ export default function Login() {
         </div>
         <form onSubmit={submit} className="card card-pad flex flex-col gap-4" noValidate>
           <h2 className="t-title-md">Log in</h2>
-          <Field label="Email" htmlFor="email">
-            <input id="email" className="input" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} aria-invalid={!!error} />
+          <Field label="Email or username" htmlFor="email">
+            <input id="email" className="input" type="text" inputMode="email" autoCapitalize="none" autoCorrect="off" spellCheck={false} autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} aria-invalid={!!error} />
           </Field>
           <Field label="Password" htmlFor="password">
             <input id="password" className="input" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} aria-invalid={!!error} />

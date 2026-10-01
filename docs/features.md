@@ -40,7 +40,7 @@
 | F28 | Auto-dispatch with SOS to volunteers (app, SMS, push) | SHOULD | Admin, Volunteer, System | shared/dispatch.ts, server/dispatch.ts, server/push.ts, Dashboard.tsx, VolunteerHome.tsx, lib/push.ts | F14, F15, F27 |
 | F29 | Community help from the public map (offer, join, take) | SHOULD | Community, Volunteer, Admin | shared/communityHelp.ts, PublicMap.tsx, routes/public.ts, routes/volunteer.ts, IncidentPage.tsx | F19, F14, F15 |
 
-**Out of scope (do not build):** victim accounts, automatic ID checking (a coordinator looks at the photo), editing an application after sending it, video upload, push notifications other than the F28 SOS, SMS other than F27/F28 (no SMS OTP, no status-update SMS), sending the SMS from inside the app (the phone's own SMS app sends it), real calls or number masking, real emergency-service integration, offline admin/volunteer actions, multiple volunteers on one incident, undo merge, analytics, translating the staff (admin/volunteer) screens.
+**Out of scope (do not build):** victim accounts, automatic ID checking (a coordinator looks at the photo), editing an application after sending it, video upload, push notifications other than the F28 SOS and the F14 new-request alert (BR-167), SMS other than F27/F28/BR-167 (no SMS OTP, no status-update SMS), sending the SMS from inside the app (the phone's own SMS app sends it), real calls or number masking, real emergency-service integration, offline admin/volunteer actions, multiple volunteers on one incident, undo merge, analytics, translating the staff (admin/volunteer) screens.
 
 ---
 
@@ -145,7 +145,7 @@
 
 ### F11 — Staff login
 **Goal:** admin and volunteers log in with seeded accounts.
-**Behaviour:** S06 email + password + two quick buttons "Demo: Admin", "Demo: Volunteer (Ravi)" that fill credentials (visible only in DEV mode). After login redirect: ADMIN → `/admin`, VOLUNTEER → `/volunteer`. A volunteer whose application (F26) is still waiting sees "waiting for a coordinator to approve". S06 links to S13. Logout button in Layout. Token kept in sessionStorage.
+**Behaviour:** S06 email (or a short username: `admin` means `admin@hopegrid.app`, `LOGIN_DOMAIN`) + password + two quick buttons "Demo: Admin", "Demo: Volunteer (Ravi)" that fill credentials (visible only in DEV mode). After login redirect: ADMIN → `/admin`, VOLUNTEER → `/volunteer`. A volunteer whose application (F26) is still waiting sees "waiting for a coordinator to approve". S06 links to S13. Logout button in Layout. Token kept in sessionStorage.
 **Acceptance:**
 - [ ] Volunteer cannot open `/admin` (redirected) and gets 403 from admin API.
 
@@ -178,11 +178,13 @@
 
 ### F14 — Volunteer suggestions & assignment
 **Goal:** admin picks the right volunteer quickly; system only suggests.
-**Behaviour:** suggestions per BR-60…BR-63 shown when the incident has no active assignment and status ∈ {NEW, VERIFIED}. Each card: name, score, distance, reasons ("✓ Swimming", "✓ Life jacket", "1.2 km away"), missing ("✗ Boat"). Button **Assign** → confirm modal (if incident NEW: "This incident is not verified yet. The volunteer may be going to check it.") → assignment ASSIGNED (BR-103). "Cancel assignment" button on an active assignment. **Send on WhatsApp** (added 2026-09-30): on an active assignment, a button opens WhatsApp on the coordinator's device with the volunteer's number and a ready message (incident type, priority, code, area, link to the volunteer's assignment page); the coordinator presses Send. It uses a `wa.me` link, so there's no API, account or cost. The message never contains the victim's name, phone or report text. Hidden when the volunteer has no phone number (`src/lib/whatsapp.ts`).
+**Behaviour:** suggestions per BR-60…BR-63 shown when the incident has no active assignment and status ∈ {NEW, VERIFIED}. Each card: name, score, distance, reasons ("✓ Swimming", "✓ Life jacket", "1.2 km away"), missing ("✗ Boat"). Button **Assign** → confirm modal (if incident NEW: "This incident is not verified yet. The volunteer may be going to check it.") → assignment ASSIGNED (BR-103). "Cancel assignment" button on an active assignment. **Send on WhatsApp** (added 2026-09-30): on an active assignment, a button opens WhatsApp on the coordinator's device with the volunteer's number and a ready message (incident type, priority, code, area, link to the volunteer's assignment page); the coordinator presses Send. It uses a `wa.me` link, so there's no API, account or cost. The message never contains the victim's name, phone or report text. Hidden when the volunteer has no phone number (`src/lib/whatsapp.ts`). **Volunteer told automatically** (added 2026-10-01, BR-167): assigning also sends the volunteer an SMS ("Reply YES … or NO …") if they have a phone number, and a push notification "New help request #…" if their Android app registered for notifications.
 **Acceptance:**
 - [ ] Demo: Ravi is ranked first for the flood incident.
 - [ ] After assigning, "Send on WhatsApp" opens WhatsApp with the volunteer's number and the message (needs a phone number on the volunteer's profile).
 - [ ] BUSY volunteers and volunteers who declined this incident never appear.
+- [x] Assigning sends one SMS and one push on the `help_requests` channel, with nothing about the reporter; YES by SMS accepts (API test).
+- [ ] The "New help request" notification pops up on a real phone with the app closed. **TODO: needs verification.**
 
 ### F15 — Volunteer assignment workflow
 **Goal:** volunteer receives, accepts and progresses through the response.
@@ -299,7 +301,8 @@ a volunteer must answer quickly, even with the app closed.
 2. The system offers each waiting incident, most urgent first, to the top-ranked volunteer (F14), one offer per
    volunteer at a time.
 3. The volunteer gets: a full-screen SOS in the app (S09) with a countdown and Accept / Decline only; an SMS "HopeGrid
-   SOS #… Reply YES … or NO …"; a push notification (Android app with Firebase).
+   SOS #… Reply YES … or NO …"; a push notification (Android app with Firebase) on the high-importance "Help requests"
+   channel. If the phone's notification permission is off, S09 says so, with how to turn it on and "Try again".
 4. No answer in time → declined automatically and offered to the next volunteer. YES / NO by SMS works like the buttons.
 5. S08: the assignment shows "Auto-dispatch" and "must answer by 14:05". Coordinators can cancel or reassign as usual.
 6. Auto-sent incidents stay off the public map until verified or the volunteer is on site.

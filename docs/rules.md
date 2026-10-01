@@ -549,6 +549,14 @@ clears `auto_dispatched_at`.
 **BR-166 Coordinators stay in charge.** Auto-dispatch only creates assignments. It never verifies, rejects, merges,
 escalates or resolves. Coordinators can cancel any assignment (BR-104), reassign, or switch it OFF at any time.
 
+**BR-167 A coordinator's assignment is sent too.** When a coordinator assigns a volunteer (F14), the volunteer is told
+the same two ways as an SOS (BR-164), without a deadline: an SMS "HopeGrid: new request #<code>: <facts> at <place>,
+<distance> away. Reply YES <code> to accept or NO <code> to decline, or open the app." (answered as in BR-163), and a
+push notification "New help request #<code>". Push goes to the high-importance Android channel `help_requests`
+(`PUSH_CHANNEL`), so it pops up with sound. Sending happens after the assignment is saved and never fails it. In the
+app, a push that arrives while it is open refreshes the request list at once, and the volunteer home warns when the
+phone's notification permission is off.
+
 ## B13. Community help from the public map (F29)
 
 Split by trust: approved volunteers (ID-checked, BR-150) may take an incident; anyone else offers, and a coordinator

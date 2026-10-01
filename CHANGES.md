@@ -363,6 +363,35 @@ whenever the phone has signal, even without mobile data.
 - **Database:** `reports.app_language`. **Run `schema.sql` before restarting the server**: the new code writes that
   column, so reports would fail to save without it.
 
+## Judges' demo setup (2026-10-01)
+
+- **Real database cleared** on the owner's request (a backup was taken first, outside the repo). New accounts: an admin and
+  9 volunteers with different skills, equipment and vehicles, 0.6–7.6 km from where the test reports came from.
+  Later the same day, on the owner's request, all 9 volunteers were deleted again (backup first; their one waiting
+  assignment was removed and logged on its incident). Only the admin remains; volunteers now sign up through the app.
+- **Short logins:** staff can log in with a username; `admin` means `admin@hopegrid.app` (`LOGIN_DOMAIN`). The login
+  field accepts either. 1 new API test.
+- **Demo material** next to the repo: `HopeGrid-Demo.mp4` (3:00, recorded on an in-memory copy with sample data),
+  `HopeGrid-Demo-Speaker-Notes.pdf` and `HopeGrid-Tech-Stack.pdf`.
+- **Fixes found while recording:** a voice note's English line now starts on its own line on the incident page;
+  Whisper's `[BLANK_AUDIO]` no longer counts as a transcript (1 new test).
+- **False positives and false negatives (English):** new 79-report set `eval/english.jsonl` and per-flag error rates in
+  `eval/run.ts`; results in `docs/evaluation.md` §2.6 and `HopeGrid-AI-Error-Rates.pdf`. The AI never missed a trapped
+  person; it missed 3 of 12 Critical reports (all still rated High) and raised 10 Critical false alarms.
+- **Found, not fixed:** the 3B AI's English for Tamil voice notes can be nonsense; IndicConformer Tamil drops the first
+  word after a very quiet start; the keyword rules file "collapsed" (medical) as Building collapse.
+
+## Volunteer notifications fixed (2026-10-01, BR-167)
+
+- **Why nothing arrived:** only auto-dispatch sent a push or SMS, never a coordinator's **Assign**. On the test phone,
+  notifications for HopeGrid were turned off, so the app never registered; the one stored token was dead
+  (UNREGISTERED). After the database reset no volunteer had a phone number, so there was no SMS and the WhatsApp button
+  said "No phone number".
+- **Now:** Assign sends the volunteer an SMS ("Reply YES CODE or NO CODE") and a push "New help request #CODE". Pushes
+  use a high-importance "Help requests" channel (sound, pop-up, lock screen). An open app refreshes at once when one
+  arrives. The volunteer home shows "Notifications are off" with how to fix it and a Try again button.
+- 2 new tests (1 rule, 1 API); the push test checks the channel. 2 of 2 deliberate breaks caught.
+
 ## Only you can do these
 
 - **Rotate the Supabase keys.**

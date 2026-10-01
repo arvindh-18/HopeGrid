@@ -365,7 +365,10 @@ function ReportCard({ r }: { r: AdminReport }) {
           <p className="mb-2 flex items-center gap-2 t-caption"><IconMic size={14} /> Voice note{r.audioSeconds ? `, ${r.audioSeconds} s` : ''}</p>
           <audio controls src={r.audioUrl} className="h-9 w-full max-w-sm" />
           <p className="mt-2 t-body-sm">
-            {r.transcriptStatus === 'DONE' && <>Transcript: "{r.transcript}"</>}
+            {r.transcriptStatus === 'DONE' && (() => {
+              const [said, english] = (r.transcript ?? '').split('\n\nEnglish: '); // BR-12: original, then the English version
+              return <>Transcript: "{said}"{english && <span className="mt-1 block">English: "{english}"</span>}</>;
+            })()}
             {r.transcriptStatus === 'FAILED' && <span className="text-[#924400]">Transcription failed — listen to the recording.</span>}
             {r.transcriptStatus === 'NONE' && <span className="text-muted">Transcribing…</span>}
           </p>

@@ -7,11 +7,12 @@
 | File | What it is |
 |---|---|
 | `reports.jsonl` | 40 short emergency reports (12 English, 10 Tamil, 10 Hindi, 8 mixed Tanglish/Hinglish) with hand-written expected `Extraction` fields |
+| `english.jsonl` | 79 English reports for false positives and false negatives per safety flag (written by `make-english.py`; labels follow the guide below, needs derived by the BR-11 rule) |
 | `duplicate-pairs.jsonl` | 24 pairs of incidents, each labelled "same real-world situation?" |
 | `run.ts` | Accuracy of the keyword extractor and of the local LLM on `reports.jsonl`, plus duplicate precision/recall |
 | `bench.ts` | Latency of speech-to-text (+ translation) and of AI structuring on this machine |
 
-Run: `npx tsx eval/run.ts` (add `--no-llm` for the keyword baseline only) and `npx tsx eval/bench.ts`.
+Run: `npx tsx eval/run.ts` (add `--data english` for the English false-positive/negative set, `--no-llm` for the keyword baseline only) and `npx tsx eval/bench.ts`.
 Both use the models in `models/` if `npm run setup-ai` installed them, and skip the model parts otherwise.
 Results are written to `eval/results/` (git-ignored) and summarised in `docs/evaluation.md`.
 

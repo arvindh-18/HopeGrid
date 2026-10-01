@@ -9,6 +9,8 @@ export const EMERGENCY_NUMBER = '112';
 export const DEMO_OTP = '123456';
 // Seeded staff accounts (architecture.md §12). Login quick-fill buttons show only in DEV builds (F11).
 export const DEMO_PASSWORD = 'Demo@123';
+/** Staff may log in with a short name: "admin" means admin@hopegrid.app. */
+export const LOGIN_DOMAIN = 'hopegrid.app';
 export const DEMO_ADMIN_EMAIL = 'admin@demo.app';
 export const DEMO_VOLUNTEER_EMAIL = 'ravi@demo.app';
 export const DEMO_CENTER = { lat: 13.0405, lng: 80.2337 };
@@ -40,6 +42,8 @@ export const DISPATCH_MAX_THRESHOLD = 100;
 export const DISPATCH_MAX_RESPONSE_MINUTES = 30;
 export const DISPATCH_TICK_MS = 15_000;             // how often the server checks answer deadlines and the queue
 export const PUSH_TIMEOUT_MS = 10_000;
+/** Android notification channel for volunteer alerts: high importance, so they pop up with sound (F28). */
+export const PUSH_CHANNEL = 'help_requests';
 
 // F29 community help (BR-170…BR-174)
 export const HELP_NAME_MAX = 80;

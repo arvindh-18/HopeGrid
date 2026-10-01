@@ -409,6 +409,18 @@ describe('Status rules (BR-100…BR-104) and access control', () => {
     expect(login.status).toBe(200);
     expect(login.body.user).toEqual({ id: ravi.id, name: 'Ravi', role: 'VOLUNTEER' });
   });
+
+  it('accepts a short login name: "admin" means admin@hopegrid.app', async () => {
+    const { id } = fakeAuth.addUser('admin@hopegrid.app', 'admin@123');
+    const { error } = await fakeDb.from('profiles').insert({ id, name: 'Admin', email: 'admin@hopegrid.app', role: 'ADMIN' });
+    expect(error).toBeNull();
+    for (const typed of ['admin', ' ADMIN ', 'admin@hopegrid.app']) {
+      const login = await server.call('POST', '/auth/login', { email: typed, password: 'admin@123' });
+      expect(login.status, typed).toBe(200);
+      expect(login.body.user).toEqual({ id, name: 'Admin', role: 'ADMIN' });
+    }
+    expect((await server.call('POST', '/auth/login', { email: 'admin', password: 'wrong' })).status).toBe(401);
+  });
 });
 
 // ------------------------------------------------------------------------------------------------ F14/F15 assignments
@@ -1081,7 +1093,7 @@ describe('Auto-dispatch and SOS to volunteers (F28, BR-160…BR-166)', () => {
   const SECRET = 'test-sms-secret';
   const GATEWAY = 'http://gateway.test:8080';
   let sms: { to: string; text: string }[];
-  let pushes: { token: string; title: string; body: string; auth: string }[];
+  let pushes: { token: string; title: string; body: string; channel: string; auth: string }[];
   let fcmStatus: number;
 
   const setDispatch = (mode: string, threshold = 5, responseMinutes = 3) => adminCall('PUT', '/dispatch', { mode, threshold, responseMinutes });
@@ -1110,7 +1122,7 @@ describe('Auto-dispatch and SOS to volunteers (F28, BR-160…BR-166)', () => {
       if (u === 'https://oauth2.googleapis.com/token') return Response.json({ access_token: 'google-token', expires_in: 3600 });
       if (u.startsWith('https://fcm.googleapis.com/v1/projects/hopegrid-test/messages:send')) {
         const b = JSON.parse(String(init?.body));
-        pushes.push({ token: b.message.token, title: b.message.notification.title, body: b.message.notification.body, auth: String((init?.headers as Record<string, string>).Authorization) });
+        pushes.push({ token: b.message.token, title: b.message.notification.title, body: b.message.notification.body, channel: b.message.android.notification.channel_id, auth: String((init?.headers as Record<string, string>).Authorization) });
         return fcmStatus === 200 ? Response.json({ name: 'ok' }) : Response.json({ error: { status: 'NOT_FOUND', details: [{ errorCode: 'UNREGISTERED' }] } }, { status: 404 });
       }
       throw new Error(`unexpected fetch ${u}`);
@@ -1224,13 +1236,18 @@ describe('Auto-dispatch and SOS to volunteers (F28, BR-160…BR-166)', () => {
     expect((await server.call('GET', '/public/incidents')).body.incidents.map((i: { code: string }) => i.code)).toEqual([incident.code]);
   });
 
-  it('with Firebase configured, also sends the SOS as a push notification and forgets a dead token (BR-164)', async () => {
+  /** Configures a made-up Firebase service account and returns its public key. */
+  const useFirebase = () => {
     const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
-    const dir = mkdtempSync(join(tmpdir(), 'hopegrid-push-'));
-    const keyFile = join(dir, 'service-account.json');
+    const keyFile = join(mkdtempSync(join(tmpdir(), 'hopegrid-push-')), 'service-account.json');
     writeFileSync(keyFile, JSON.stringify({ project_id: 'hopegrid-test', client_email: 'push@hopegrid-test.iam.gserviceaccount.com', private_key: privateKey.export({ type: 'pkcs8', format: 'pem' }) }));
     process.env.FIREBASE_SERVICE_ACCOUNT = keyFile;
     resetPush();
+    return publicKey;
+  };
+
+  it('with Firebase configured, also sends the SOS as a push notification and forgets a dead token (BR-164)', async () => {
+    const publicKey = useFirebase();
 
     expect((await volunteerCall(ravi, 'POST', '/push-token', { token: 'device-token-1' })).status).toBe(200);
     expect((await volunteerCall(ravi, 'POST', '/push-token', { token: 42 })).status).toBe(400);
@@ -1238,7 +1255,7 @@ describe('Auto-dispatch and SOS to volunteers (F28, BR-160…BR-166)', () => {
     const { incident } = await submit();
     await runDispatch();
     await vi.waitFor(() => expect(pushes).toHaveLength(1));
-    expect(pushes[0]).toMatchObject({ token: 'device-token-1', title: `SOS #${incident.code}: help needed`, auth: 'Bearer google-token' });
+    expect(pushes[0]).toMatchObject({ token: 'device-token-1', title: `SOS #${incident.code}: help needed`, channel: 'help_requests', auth: 'Bearer google-token' });
     // The Google sign-in was signed with the service account's key.
     const tokenCall = vi.mocked(globalThis.fetch).mock.calls.find(([u]) => String(u) === 'https://oauth2.googleapis.com/token')!;
     const jwt = new URLSearchParams(String(tokenCall[1]!.body)).get('assertion')!.split('.');
@@ -1251,6 +1268,24 @@ describe('Auto-dispatch and SOS to volunteers (F28, BR-160…BR-166)', () => {
     await runDispatch(); // Ravi timed out; Priya gets it
     await vi.waitFor(() => expect(one('profiles', priya.id).push_token).toBeNull());
     expect(one('profiles', ravi.id).push_token).toBe('device-token-1');
+  });
+
+  it("a coordinator's assignment also reaches the volunteer by SMS and push, and YES by SMS accepts it (BR-167)", async () => {
+    useFirebase();
+    await volunteerCall(ravi, 'POST', '/push-token', { token: 'device-token-1' });
+    const { incident } = await submit(submission({ phone: '+919812345678' }));
+    const offer = await assign(incident.id, ravi);
+    await vi.waitFor(() => expect(sms).toHaveLength(1));
+    expect(sms[0].to).toBe(ravi.phone);
+    expect(sms[0].text).toMatch(new RegExp(`^HopeGrid: new request #${incident.code}: Flood, .*Reply YES ${incident.code} to accept or NO ${incident.code} to decline`));
+    await vi.waitFor(() => expect(pushes).toHaveLength(1));
+    expect(pushes[0]).toMatchObject({ token: 'device-token-1', title: `New help request #${incident.code}`, channel: 'help_requests' });
+    expect(pushes[0].body).toMatch(/^Flood, .*Open HopeGrid to accept or decline\.$/);
+    expect(sms[0].text + pushes[0].body).not.toContain('9812345678'); // nothing about the reporter (BR-164)
+
+    expect((await smsFrom(ravi.phone, `YES ${incident.code}`)).status).toBe(200);
+    expect(one('assignments', offer).status).toBe('ACCEPTED');
+    expect(server.errors).toEqual([]);
   });
 });
 
